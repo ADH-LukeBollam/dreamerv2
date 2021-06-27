@@ -94,6 +94,31 @@ atari:
   loss_scales.discount: 5.0
   .*\.wd$: 1e-6
 
+sc2:
+
+  task: CollectMineralShards
+  time_limit: 108000  # 30 minutes of game play.
+  action_repeat: 4
+  steps: 2e8
+  eval_every: 1e5
+  log_every: 1e5
+  prefill: 200000
+  grayscale: True
+  train_every: 16
+  clip_rewards: tanh
+  rssm: {hidden: 600, deter: 600, stoch: 32, discrete: 32}
+  actor.dist: onehot
+  model_opt.lr: 2e-4
+  actor_opt.lr: 4e-5
+  critic_opt.lr: 1e-4
+  actor_ent: 1e-3
+  discount: 0.999
+  actor_grad: reinforce
+  actor_grad_mix: 0
+  loss_scales.kl: 0.1
+  loss_scales.discount: 5.0
+  .*\.wd$: 1e-6
+
 dmc:
 
   task: dmc_walker_walk

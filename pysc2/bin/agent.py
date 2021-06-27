@@ -125,8 +125,7 @@ def main(unused_argv):
   agent_module, agent_name = FLAGS.agent.rsplit(".", 1)
   agent_cls = getattr(importlib.import_module(agent_module), agent_name)
   agent_classes.append(agent_cls)
-  players.append(sc2_env.Agent(sc2_env.Race[FLAGS.agent_race],
-                               FLAGS.agent_name or agent_name))
+  players.append(sc2_env.Agent(sc2_env.Race[FLAGS.agent_race], FLAGS.agent_name or agent_name))
 
   if map_inst.players >= 2:
     if FLAGS.agent2 == "Bot":

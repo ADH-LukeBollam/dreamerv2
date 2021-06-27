@@ -131,11 +131,13 @@ class Atari:
 
 
 class Sc2:
-    def __init__(self, map_name, players, screen_size, minimap_size, steps_per_action, steps_per_episode, fog, visualise):
+    def __init__(self, map_name, screen_size, minimap_size, steps_per_action, steps_per_episode, fog, visualise):
+        from absl import flags
+        flags.FLAGS.mark_as_parsed()
         env = sc2_env.SC2Env(
             map_name=map_name,
             battle_net_map=False,
-            players=players,
+            players=[sc2_env.Agent(sc2_env.Race.random, 'agent')],
             agent_interface_format=sc2_env.parse_agent_interface_format(
                 feature_screen=screen_size,
                 feature_minimap=minimap_size,
@@ -160,9 +162,14 @@ class Sc2:
         return gym.spaces.Dict({'action': action})
 
     def step(self, action):
+        timestep = self._env.step(action)
         obs = {'image': np.zeros((64, 64, 3))}
-        reward = 0.0
+        reward = timestep.reward
+
         done = False
+        if timestep[0].last():
+          done=True
+
         info = {}
         return obs, reward, done, info
 

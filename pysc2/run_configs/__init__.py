@@ -27,6 +27,10 @@ flags.DEFINE_string("sc2_run_config", None,
                     "Which run_config to use to spawn the binary.")
 FLAGS = flags.FLAGS
 
+def get_latest():
+    configs = {c.name(): c for c in lib.RunConfig.all_subclasses() if c.priority()}
+
+    return max(configs.values(), key=lambda c: c.priority())(version=None)
 
 def get(version=None):
   """Get the config chosen by the flags."""
