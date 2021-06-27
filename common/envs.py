@@ -174,7 +174,7 @@ class Sc2:
         return obs, reward, done, info
 
     def reset(self):
-        obs = self._env.reset()
+        obs = {'image': self._env.reset()}
         return obs
 
     def close(self):
