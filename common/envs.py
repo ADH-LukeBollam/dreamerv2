@@ -5,6 +5,7 @@ import gym
 import numpy as np
 
 from pysc2.env import sc2_env, available_actions_printer
+from pysc2.lib.features import ScreenFeatures, Player
 
 
 class DMC:
@@ -174,8 +175,32 @@ class Sc2:
         return obs, reward, done, info
 
     def reset(self):
-        obs = {'image': self._env.reset()}
+        timestep = self._env.reset()[0]
+        obs = self.collect_sc_observation(timestep)
+
         return obs
+
+    def collect_sc_observation(self, timestep):
+
+        obs = {}
+
+        # screen features
+        screen_feat = timestep.observation.feature_screen
+        obs['visibility_screen'] = screen_feat.visibility_map
+        obs['creep_screen'] = screen_feat.creep
+
+        # minimap features
+        mini_feat = timestep.observation.feature_minimap
+        obs['visibility_mini'] = mini_feat.visibility_map
+        obs['creep_mini'] = mini_feat.creep
+
+        # player features
+        player_feat = timestep.observation.player
+        obs['player'] = player_feat[[Player.minerals, Player.vespene, Player.food_used, Player.food_cap, Player.larva_count, Player.warp_gate_count]]
+
+        # unit features
+        return obs
+
 
     def close(self):
         return self._env.close()
