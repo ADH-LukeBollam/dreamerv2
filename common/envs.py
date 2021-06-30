@@ -5,7 +5,7 @@ import gym
 import numpy as np
 
 from pysc2.env import sc2_env, available_actions_printer
-from pysc2.lib.features import ScreenFeatures, Player
+from pysc2.lib.features import ScreenFeatures, Player, FeatureUnit
 
 
 class DMC:
@@ -198,7 +198,24 @@ class Sc2:
         player_feat = timestep.observation.player
         obs['player'] = player_feat[[Player.minerals, Player.vespene, Player.food_used, Player.food_cap, Player.larva_count, Player.warp_gate_count]]
 
-        # unit features
+        # units on the screen => limit to 200
+        units = timestep.observation.feature_units
+        units = units[:, [FeatureUnit.unit_type,
+                          FeatureUnit.alliance,
+                          FeatureUnit.health_ratio,
+                          FeatureUnit.shield_ratio,
+                          FeatureUnit.energy_ratio,
+                          FeatureUnit.x,
+                          FeatureUnit.y,
+                          FeatureUnit.radius,
+                          FeatureUnit.cloak,
+                          FeatureUnit.is_blip,
+                          FeatureUnit.build_progress,
+                          FeatureUnit.is_powered,
+                          FeatureUnit.mineral_contents,
+                          FeatureUnit.vespene_contents
+                          ]]
+
         return obs
 
 
