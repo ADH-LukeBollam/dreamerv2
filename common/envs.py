@@ -154,6 +154,10 @@ class Sc2:
         self._env = env
 
     @property
+    def available_actions(self):
+        return self._env.action_spec()[0]
+
+    @property
     def observation_space(self):
         image = gym.spaces.Box(0, 255, (64, 64, 3), dtype=np.uint8)
         return gym.spaces.Dict({'image': image})
@@ -161,19 +165,29 @@ class Sc2:
     @property
     def action_space(self):
         action = gym.spaces.Box(-1, 1, (6,), dtype=np.float32)
-        return gym.spaces.Dict({'action': action})
+        return gym.spaces.Dict({'action_id': action, 'action_args': action, 'action_arg_shapes': action})
 
     def step(self, action):
+        args = []
+        # rebuild action args
+        current_arg = 0
+        for c in action['action_arg_shapes']:
+            if c == 0:
+                break
+            a = []
+            for i in range(c):
+                a.append(action['action_args'][current_arg])
+                current_arg += 1
+            args.append(a)
 
+        sc2_action = actions.FunctionCall(action['action_id'][0], args)
 
-        actions.FunctionCall(actions.FUNCTIONS.no_op.id, [])
-
-        timestep = self._env.step(action)
+        timestep = self._env.step([sc2_action])[0]
         obs = self.collect_sc_observation(timestep)
         reward = timestep.reward
 
         done = False
-        if timestep[0].last():
+        if timestep.last():
             done = True
 
         info = {}
@@ -187,6 +201,9 @@ class Sc2:
 
     def collect_sc_observation(self, timestep):
         obs = {}
+
+        # store available actions
+        obs['available_actions'] = timestep.observation.available_actions
 
         # screen features
         screen_feat = timestep.observation.feature_screen

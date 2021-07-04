@@ -86,9 +86,7 @@ def make_env(mode):
             life_done=False, sticky_actions=True, all_actions=True)
         env = common.OneHotAction(env)
     elif suite == 'sc2':
-        env = common.Sc2(
-            task, 84, 64, 22, 0, False, True
-        )
+        env = common.Sc2(task, 84, 64, 22, 0, False, False)
     else:
         raise NotImplementedError(suite)
     env = common.TimeLimit(env, config.time_limit)
@@ -107,16 +105,13 @@ def per_episode(ep, mode):
     logger.scalar(f'{mode}_return', score)
     logger.scalar(f'{mode}_length', length)
     logger.scalar(f'{mode}_eps', replay_.num_episodes)
-    should = {'train': should_video_train, 'eval': should_video_eval}[mode]
-    if should(step):
-        logger.video(f'{mode}_policy', ep['image'])
     logger.write()
 
 
 print('Create envs.')
 train_envs = [make_env('train') for _ in range(config.num_envs)]
 eval_envs = [make_env('eval') for _ in range(config.num_envs)]
-action_space = train_envs[0].action_space['action']
+action_space = train_envs[0].action_space['action_id']
 train_driver = common.Driver(train_envs)
 train_driver.on_episode(lambda ep: per_episode(ep, mode='train'))
 train_driver.on_step(lambda _: step.increment())
@@ -126,7 +121,7 @@ eval_driver.on_episode(lambda ep: per_episode(ep, mode='eval'))
 prefill = max(0, config.prefill - train_replay.total_steps)
 if prefill:
     print(f'Prefill dataset ({prefill} steps).')
-    random_agent = Sc2BaseAgent()
+    random_agent = Sc2BaseAgent(train_envs[0].available_actions)
     train_driver(random_agent, steps=prefill, episodes=1)
     eval_driver(random_agent, episodes=1)
     train_driver.reset()
