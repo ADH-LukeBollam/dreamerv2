@@ -6,6 +6,9 @@ import pathlib
 import sys
 import warnings
 
+from pysc2.agents.base_agent import BaseAgent
+from sc2_base_agent import Sc2BaseAgent
+
 try:
     import rich.traceback
 
@@ -82,6 +85,10 @@ def make_env(mode):
             task, config.action_repeat, config.image_size, config.grayscale,
             life_done=False, sticky_actions=True, all_actions=True)
         env = common.OneHotAction(env)
+    elif suite == 'sc2':
+        env = common.Sc2(
+            task, 84, 64, 22, 0, False, True
+        )
     else:
         raise NotImplementedError(suite)
     env = common.TimeLimit(env, config.time_limit)
@@ -119,7 +126,7 @@ eval_driver.on_episode(lambda ep: per_episode(ep, mode='eval'))
 prefill = max(0, config.prefill - train_replay.total_steps)
 if prefill:
     print(f'Prefill dataset ({prefill} steps).')
-    random_agent = common.RandomAgent(action_space)
+    random_agent = Sc2BaseAgent()
     train_driver(random_agent, steps=prefill, episodes=1)
     eval_driver(random_agent, episodes=1)
     train_driver.reset()

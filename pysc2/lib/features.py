@@ -216,6 +216,8 @@ class FeatureUnit(enum.IntEnum):
     attack_upgrade_level = 43
     armor_upgrade_level = 44
     shield_upgrade_level = 45
+    is_flying = 46
+    is_burrowed = 47
 
 
 class EffectPos(enum.IntEnum):
@@ -1352,6 +1354,8 @@ class Features(object):
                 u.attack_upgrade_level,
                 u.armor_upgrade_level,
                 u.shield_upgrade_level,
+                u.is_flying,
+                u.is_burrowed
             ]
             return features
 

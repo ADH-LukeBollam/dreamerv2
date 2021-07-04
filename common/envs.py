@@ -5,6 +5,7 @@ import gym
 import numpy as np
 
 from pysc2.env import sc2_env, available_actions_printer
+from pysc2.lib import actions
 from pysc2.lib.features import ScreenFeatures, Player, FeatureUnit
 
 
@@ -163,13 +164,17 @@ class Sc2:
         return gym.spaces.Dict({'action': action})
 
     def step(self, action):
+
+
+        actions.FunctionCall(actions.FUNCTIONS.no_op.id, [])
+
         timestep = self._env.step(action)
-        obs = {'image': np.zeros((64, 64, 3))}
+        obs = self.collect_sc_observation(timestep)
         reward = timestep.reward
 
         done = False
         if timestep[0].last():
-          done=True
+            done = True
 
         info = {}
         return obs, reward, done, info
@@ -181,24 +186,31 @@ class Sc2:
         return obs
 
     def collect_sc_observation(self, timestep):
-
         obs = {}
 
         # screen features
         screen_feat = timestep.observation.feature_screen
         obs['visibility_screen'] = screen_feat.visibility_map
         obs['creep_screen'] = screen_feat.creep
+        obs['height_screen'] = screen_feat.height_map
+        obs['buildable_screen'] = screen_feat.buildable
+        obs['pathable_screen'] = screen_feat.pathable
 
         # minimap features
         mini_feat = timestep.observation.feature_minimap
         obs['visibility_mini'] = mini_feat.visibility_map
         obs['creep_mini'] = mini_feat.creep
+        obs['height_mini'] = mini_feat.height_map
+        obs['buildable_mini'] = mini_feat.buildable
+        obs['pathable_mini'] = mini_feat.pathable
+        obs['units_mini'] = mini_feat.player_relative
 
         # player features
         player_feat = timestep.observation.player
         obs['player'] = player_feat[[Player.minerals, Player.vespene, Player.food_used, Player.food_cap, Player.larva_count, Player.warp_gate_count]]
 
         # units on the screen => limit to 200
+        size = 200
         units = timestep.observation.feature_units
         units = units[:, [FeatureUnit.unit_type,
                           FeatureUnit.alliance,
@@ -208,16 +220,33 @@ class Sc2:
                           FeatureUnit.x,
                           FeatureUnit.y,
                           FeatureUnit.radius,
-                          FeatureUnit.cloak,
                           FeatureUnit.is_blip,
                           FeatureUnit.build_progress,
                           FeatureUnit.is_powered,
                           FeatureUnit.mineral_contents,
-                          FeatureUnit.vespene_contents
+                          FeatureUnit.vespene_contents,
+                          FeatureUnit.cargo_space_taken,
+                          FeatureUnit.cargo_space_max,
+                          FeatureUnit.is_flying,
+                          FeatureUnit.is_burrowed,
+                          FeatureUnit.cloak,
+                          FeatureUnit.hallucination,
+                          FeatureUnit.attack_upgrade_level,
+                          FeatureUnit.armor_upgrade_level,
+                          FeatureUnit.shield_upgrade_level,
+                          FeatureUnit.buff_id_0,
+                          FeatureUnit.buff_id_1
                           ]]
 
-        return obs
+        obs['unit_count'] = np.array([np.size(units, 0)])
+        unit_dim = size - np.size(units, 0)
+        feature_dim = np.size(units, 1)
 
+        units_padded = np.concatenate([units, np.zeros((unit_dim, feature_dim))])
+
+        obs['units'] = units_padded
+
+        return obs
 
     def close(self):
         return self._env.close()
