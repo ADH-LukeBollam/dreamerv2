@@ -207,20 +207,22 @@ class Sc2:
 
         # screen features
         screen_feat = timestep.observation.feature_screen
-        obs['visibility_screen'] = screen_feat.visibility_map
-        obs['creep_screen'] = screen_feat.creep
-        obs['height_screen'] = screen_feat.height_map
-        obs['buildable_screen'] = screen_feat.buildable
-        obs['pathable_screen'] = screen_feat.pathable
+        obs['screen'] = np.stack([screen_feat.visibility_map,
+                                  screen_feat.creep,
+                                  screen_feat.height_map,
+                                  screen_feat.buildable,
+                                  screen_feat.pathable],
+                                 axis=2)
 
         # minimap features
         mini_feat = timestep.observation.feature_minimap
-        obs['visibility_mini'] = mini_feat.visibility_map
-        obs['creep_mini'] = mini_feat.creep
-        obs['height_mini'] = mini_feat.height_map
-        obs['buildable_mini'] = mini_feat.buildable
-        obs['pathable_mini'] = mini_feat.pathable
-        obs['units_mini'] = mini_feat.player_relative
+        obs['mini'] = np.stack([mini_feat.visibility_map,
+                                mini_feat.creep,
+                                mini_feat.height_map,
+                                mini_feat.buildable,
+                                mini_feat.pathable,
+                                mini_feat.player_relative],
+                               axis=2)
 
         # player features
         player_feat = timestep.observation.player

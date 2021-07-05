@@ -7,7 +7,7 @@ import sys
 import warnings
 
 from pysc2.agents.base_agent import BaseAgent
-from sc2_base_agent import Sc2BaseAgent
+from sc2_random_agent import Sc2RandomAgent
 
 try:
     import rich.traceback
@@ -121,7 +121,7 @@ eval_driver.on_episode(lambda ep: per_episode(ep, mode='eval'))
 prefill = max(0, config.prefill - train_replay.total_steps)
 if prefill:
     print(f'Prefill dataset ({prefill} steps).')
-    random_agent = Sc2BaseAgent(train_envs[0].available_actions)
+    random_agent = Sc2RandomAgent(train_envs[0].available_actions)
     train_driver(random_agent, steps=prefill, episodes=1)
     eval_driver(random_agent, episodes=1)
     train_driver.reset()

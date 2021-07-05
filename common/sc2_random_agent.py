@@ -3,7 +3,7 @@ import tensorflow as tf
 import numpy as np
 
 
-class Sc2BaseAgent:
+class Sc2RandomAgent:
     def __init__(self, action_spec):
         self.action_spec = action_spec
 
