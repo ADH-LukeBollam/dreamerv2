@@ -164,8 +164,10 @@ class Sc2:
 
     @property
     def action_space(self):
-        action = gym.spaces.Box(-1, 1, (6,), dtype=np.float32)
-        return gym.spaces.Dict({'action_id': action, 'action_args': action, 'action_arg_shapes': action})
+        action_id = gym.spaces.Box(-1, 1, (1,), dtype=np.int)
+        action_args = gym.spaces.Box(-1, 1, (10,), dtype=np.int)
+        action_arg_shapes = gym.spaces.Box(-1, 1, (5,), dtype=np.int)
+        return gym.spaces.Dict({'action_id': action_id, 'action_args': action_args, 'action_arg_shapes': action_arg_shapes})
 
     def step(self, action):
         args = []
@@ -202,8 +204,12 @@ class Sc2:
     def collect_sc_observation(self, timestep):
         obs = {}
 
-        # store available actions
-        obs['available_actions'] = timestep.observation.available_actions
+        # store available actions, pad up to 30
+        actions_pad_size = 30
+        av_actions = timestep.observation.available_actions
+        obs['available_actions_count'] = np.array([np.size(av_actions, 0)])
+        action_pad = actions_pad_size - np.size(av_actions, 0)
+        obs['available_actions'] = np.concatenate([av_actions, np.zeros(action_pad, dtype=np.int)])
 
         # screen features
         screen_feat = timestep.observation.feature_screen
@@ -261,9 +267,7 @@ class Sc2:
         unit_dim = size - np.size(units, 0)
         feature_dim = np.size(units, 1)
 
-        units_padded = np.concatenate([units, np.zeros((unit_dim, feature_dim))])
-
-        obs['units'] = units_padded
+        obs['units'] = np.concatenate([units, np.zeros((unit_dim, feature_dim))])
 
         return obs
 

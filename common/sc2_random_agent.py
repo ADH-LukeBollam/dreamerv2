@@ -16,7 +16,9 @@ class Sc2RandomAgent:
         arg_flattened = []
 
         for i in range(num_steps):
-            function_id = np.random.choice(obs['available_actions'][0])
+            av_act_count = obs['available_actions_count'][0][0]
+            av_act = obs['available_actions'][0][0:av_act_count]
+            function_id = np.random.choice(av_act)
             function_ids.append(np.array([function_id], dtype=np.int))
 
             args = [[np.random.randint(0, size) for size in arg.sizes]
@@ -24,7 +26,7 @@ class Sc2RandomAgent:
 
             # up to 5 required args for any action (action dependant, sometimes less are needed
             arg_shape = [len(a) for a in args]
-            arg_shape_padded = np.concatenate([arg_shape, np.zeros([5 - np.size(args)], dtype=np.int)])
+            arg_shape_padded = np.concatenate([arg_shape, np.zeros([5 - len(args)], dtype=np.int)])
             arg_shapes.append(arg_shape_padded)
 
             # up to 10 required total args components
