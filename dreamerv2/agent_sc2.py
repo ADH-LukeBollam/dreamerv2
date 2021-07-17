@@ -96,7 +96,13 @@ class WorldModel(common.Module):
         self.heads = {}
         shape = config.image_size + (1 if config.grayscale else 3,)
         self.encoder = common.Sc2Encoder(**config.encoder)
+        self.heads['available_actions_count'] = None
+        self.heads['available_actions'] = None
         self.heads['screen'] = common.ConvDecoder(shape, **config.decoder)
+        self.heads['mini'] = common.ConvDecoder(shape, **config.decoder)
+        self.heads['player'] = None
+        self.heads['unit_count'] = None
+        self.heads['units'] = None
         self.heads['reward'] = common.MLP([], **config.reward_head)
         if config.pred_discount:
             self.heads['discount'] = common.MLP([], **config.discount_head)

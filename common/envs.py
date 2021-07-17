@@ -6,7 +6,9 @@ import numpy as np
 
 from pysc2.env import sc2_env, available_actions_printer
 from pysc2.lib import actions
+from pysc2.lib.buffs import get_buff_embed_lookup
 from pysc2.lib.features import ScreenFeatures, Player, FeatureUnit
+from pysc2.lib.units import get_unit_embed_lookup
 
 
 class DMC:
@@ -152,6 +154,8 @@ class Sc2:
             visualize=visualise)
         env = available_actions_printer.AvailableActionsPrinter(env)
         self._env = env
+        self.unit_embed_lookup = get_unit_embed_lookup()
+        self.buff_embed_lookup = get_buff_embed_lookup()
 
     @property
     def available_actions(self):
@@ -227,7 +231,8 @@ class Sc2:
                                 mini_feat.height_map,
                                 mini_feat.buildable,
                                 mini_feat.pathable,
-                                mini_feat.player_relative],
+                                mini_feat.player_relative,
+                                mini_feat.camera],
                                axis=2)
 
         # player features
@@ -237,7 +242,7 @@ class Sc2:
         # units on the screen => limit to 200
         size = 200
         units = timestep.observation.feature_units
-        units = units[:, [FeatureUnit.unit_type,
+        units = units[:, [self.unit_embed_lookup(FeatureUnit.unit_type),
                           FeatureUnit.alliance,
                           FeatureUnit.health_ratio,
                           FeatureUnit.shield_ratio,
@@ -245,6 +250,7 @@ class Sc2:
                           FeatureUnit.x,
                           FeatureUnit.y,
                           FeatureUnit.radius,
+                          FeatureUnit.is_selected,
                           FeatureUnit.is_blip,
                           FeatureUnit.build_progress,
                           FeatureUnit.is_powered,
