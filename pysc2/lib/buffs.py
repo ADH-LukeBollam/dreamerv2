@@ -46,7 +46,7 @@ class Buffs(enum.IntEnum):
     ImmortalOverload = 102
     InhibitorZoneTemporalField = 289
     LockOn = 116
-    LurkerHoldFire = 136
+    LurkerHoldFire = 136        # looks like only HoldFireB gets used?
     LurkerHoldFireB = 137
     MedivacSpeedBoost = 89
     NeuralParasite = 22
@@ -72,15 +72,33 @@ class Buffs(enum.IntEnum):
     VoidRaySwarmDamageBoost = 122
 
 
+# convert the buffs to a dense list so that we dont waste a
+# heap of memory creating embeddings for units that dont exist
 def get_buff_embed_lookup():
     lookup = {}
 
-    # chuck a -1 in there for no buff (added to FeatureUnit definition
-    lookup[-1] = 0
+    # merge some buffs together if they are the same effect
+    vespene_carry = 0
+    blinding_cloud = 1
+    hold_fire = 2
+    cloak = 3
+    stim = 4
 
-    embed_index = 1
-    for buff_id in list(map(int, Buffs)):
-        lookup[buff_id] = embed_index
-        embed_index += 1
+    embed_index = 5
+
+    for buff_id in Buffs:
+        if buff_id == Buffs.CarryHarvestableVespeneGeyserGas or buff_id == Buffs.CarryHarvestableVespeneGeyserGasProtoss or buff_id == Buffs.CarryHarvestableVespeneGeyserGasZerg:
+            lookup[buff_id] = vespene_carry
+        elif buff_id == Buffs.BlindingCloud or buff_id == Buffs.BlindingCloudStructure:
+            lookup[buff_id] = blinding_cloud
+        elif buff_id == Buffs.GhostHoldFire or buff_id == Buffs.GhostHoldFireB or buff_id == Buffs.LurkerHoldFire or buff_id == Buffs.LurkerHoldFireB:
+            lookup[buff_id] = hold_fire
+        elif buff_id == Buffs.BansheeCloak or buff_id == Buffs.GhostCloak:
+            lookup[buff_id] = cloak
+        elif buff_id == Buffs.Stimpack or buff_id == Buffs.StimpackMarauder:
+            lookup[buff_id] = stim
+        else:
+            lookup[buff_id] = embed_index
+            embed_index += 1
 
     return lookup

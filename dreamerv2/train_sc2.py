@@ -86,7 +86,7 @@ def make_env(mode):
             life_done=False, sticky_actions=True, all_actions=True)
         env = common.OneHotAction(env)
     elif suite == 'sc2':
-        env = common.Sc2(task, 84, 64, 22, 0, False, False)
+        env = common.Sc2(task, 84, 64, 22, 0, False, True)
     else:
         raise NotImplementedError(suite)
     env = common.TimeLimit(env, config.time_limit)

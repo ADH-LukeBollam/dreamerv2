@@ -57,11 +57,11 @@ flags.DEFINE_integer("game_steps_per_episode", None, "Game steps per episode.")
 flags.DEFINE_integer("max_episodes", 0, "Total episodes.")
 flags.DEFINE_integer("step_mul", 8, "Game steps per agent step.")
 
-flags.DEFINE_string("agent", "pysc2.agents.random_agent.RandomAgent",
+flags.DEFINE_string("agent", "pysc2.agents.base_agent.BaseAgent",
                     "Which agent to run, as a python path to an Agent class.")
 flags.DEFINE_string("agent_name", None,
                     "Name of the agent in replays. Defaults to the class name.")
-flags.DEFINE_enum("agent_race", "random", sc2_env.Race._member_names_,  # pylint: disable=protected-access
+flags.DEFINE_enum("agent_race", "terran", sc2_env.Race._member_names_,  # pylint: disable=protected-access
                   "Agent 1's race.")
 
 flags.DEFINE_string("agent2", "Bot", "Second agent, either Bot or agent class.")
@@ -91,6 +91,7 @@ def run_thread(agent_classes, players, map_name, visualize):
       map_name=map_name,
       battle_net_map=FLAGS.battle_net_map,
       players=players,
+      realtime=True,
       agent_interface_format=sc2_env.parse_agent_interface_format(
           feature_screen=FLAGS.feature_screen_size,
           feature_minimap=FLAGS.feature_minimap_size,

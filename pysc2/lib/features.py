@@ -36,6 +36,9 @@ from pysc2.lib import transform
 from s2clientprotocol import raw_pb2 as sc_raw
 from s2clientprotocol import sc2api_pb2 as sc_pb
 
+from pysc2.lib.buffs import get_buff_embed_lookup
+from pysc2.lib.units import get_unit_embed_lookup
+
 sw = stopwatch.sw
 
 EPSILON = 1e-5
@@ -201,23 +204,61 @@ class FeatureUnit(enum.IntEnum):
     order_id_1 = 28
     tag = 29  # Unique identifier for a unit (only populated for raw units).
     hallucination = 30
-    buff_id_0 = 31
-    buff_id_1 = 32
-    addon_unit_type = 33
-    active = 34
-    is_on_screen = 35
-    order_progress_0 = 36
-    order_progress_1 = 37
-    order_id_2 = 38
-    order_id_3 = 39
-    is_in_cargo = 40
-    buff_duration_remain = 41
-    buff_duration_max = 42
-    attack_upgrade_level = 43
-    armor_upgrade_level = 44
-    shield_upgrade_level = 45
-    is_flying = 46
-    is_burrowed = 47
+    addon_unit_type = 31
+    active = 32
+    is_on_screen = 33
+    order_progress_0 = 34
+    order_progress_1 = 35
+    order_id_2 = 36
+    order_id_3 = 37
+    is_in_cargo = 38
+    buff_duration_remain = 39
+    buff_duration_max = 40
+    attack_upgrade_level = 41
+    armor_upgrade_level = 42
+    shield_upgrade_level = 43
+    is_flying = 44
+    is_burrowed = 45
+    # buff_list
+    Vespene_carry = 46
+    Blinding_cloud = 47
+    Hold_fire = 48
+    Cloak_buff = 49
+    Stim = 50
+    CarryHighYieldMineralFieldMinerals = 51
+    CarryMineralFieldMinerals = 52
+    ChannelSnipeCombat = 53
+    Charging = 54
+    ChronoBoostEnergyCost = 55
+    CloakFieldEffect = 56
+    Contaminated = 57
+    EMPDecloak = 58
+    FungalGrowth = 59
+    GravitonBeam = 60
+    GuardianShield = 61
+    ImmortalOverload = 62
+    InhibitorZoneTemporalField = 63
+    LockOn = 64
+    MedivacSpeedBoost = 65
+    NeuralParasite = 66
+    OracleRevelation = 67
+    OracleStasisTrapTarget = 68
+    OracleWeapon = 69
+    ParasiticBomb = 70
+    ParasiticBombSecondaryUnitSearch = 71
+    ParasiticBombUnitKU = 72
+    PowerUserWarpable = 73
+    PsiStorm = 74
+    QueenSpawnLarvaTimer = 75
+    RavenScramblerMissile = 76
+    RavenShredderMissileArmorReduction = 77
+    RavenShredderMissileTint = 78
+    Slow = 79
+    SupplyDrop = 80
+    TemporalField = 81
+    ViperConsumeStructure = 82
+    VoidRaySpeedUpgrade = 83
+    VoidRaySwarmDamageBoost = 84
 
 
 class EffectPos(enum.IntEnum):
@@ -961,6 +1002,12 @@ class Features(object):
         self._map_size = map_size
         self._map_name = map_name
 
+        # collect distinct buff values and add an array to end of feature_units signalling which buffs are on/off
+        self._buff_lookup = get_buff_embed_lookup()
+        self._num_buffs = len(set(self._buff_lookup.values()))
+
+        self.unit_embed_lookup = get_unit_embed_lookup()
+
         if (aif.use_feature_units
             or aif.use_camera_position
             or aif.use_raw_units):
@@ -1286,7 +1333,7 @@ class Features(object):
         def get_addon_type(tag):
             if not tag_types:
                 for u in raw.units:
-                    tag_types[u.tag] = u.unit_type
+                    tag_types[u.tag] = self.unit_embed_lookup[u.unit_type]
             return tag_types.get(tag, 0)
 
         def full_unit_vec(u, pos_transform, is_raw=False):
@@ -1304,7 +1351,7 @@ class Features(object):
 
             features = [
                 # Match unit_vec order
-                u.unit_type,
+                self.unit_embed_lookup[u.unit_type],
                 u.alliance,  # Self = 1, Ally = 2, Neutral = 3, Enemy = 4
                 u.health,
                 u.shield,
@@ -1339,8 +1386,6 @@ class Features(object):
                 raw_order(1),
                 u.tag if is_raw else 0,
                 u.is_hallucination,
-                u.buff_ids[0] if len(u.buff_ids) >= 1 else 0,
-                u.buff_ids[1] if len(u.buff_ids) >= 2 else 0,
                 get_addon_type(u.add_on_tag) if u.add_on_tag else 0,
                 u.is_active,
                 u.is_on_screen,
@@ -1357,6 +1402,12 @@ class Features(object):
                 u.is_flying,
                 u.is_burrowed
             ]
+
+            buff_features = [0 for _ in range(self._num_buffs)]
+            for b in u.buff_ids:
+                buff_features[self._buff_lookup[b]] = 1
+
+            features += buff_features
             return features
 
         raw = obs.observation.raw_data
@@ -1426,7 +1477,7 @@ class Features(object):
             features = []
             for v in u.passengers:
                 features.append([
-                    v.unit_type,
+                    self.unit_embed_lookup[v.unit_type],
                     u.alliance,  # Self = 1, Ally = 2, Neutral = 3, Enemy = 4
                     v.health,
                     v.shield,
