@@ -171,11 +171,38 @@ class WorldModel(common.Module):
         dtype = prec.global_policy().compute_dtype
         obs = obs.copy()
 
-        screen_vis = tf.one_hot(obs['screen'][:, :, :, :, 0], 4, dtype=dtype)
+        # screen preproc
+        screen_vis = tf.one_hot(obs['screen'][:, :, :, :, 0], 3, dtype=dtype)
         screen_height = tf.cast(obs['screen'][:, :, :, :, 1:2], dtype) / 255.0 - 0.5
         obs['screen'] = tf.concat([screen_vis, screen_height, tf.cast(obs['screen'][:, :, :, :, 2:5], dtype)], axis=4)
 
-        # obs['image'] = tf.cast(obs['image'], dtype) / 255.0 - 0.5
+        # minimap preproc
+        mini_vis = tf.one_hot(obs['mini'][:, :, :, :, 0], 4, dtype=dtype)
+        mini_height = tf.cast(obs['mini'][:, :, :, :, 1:2], dtype) / 255.0 - 0.5
+        mini_relative = tf.one_hot(obs['mini'][:, :, :, :, 2], 5, dtype=dtype)
+        obs['mini'] = tf.concat([mini_vis, mini_height, mini_relative, tf.cast(obs['mini'][:, :, :, :, 2:5], dtype)], axis=4)
+
+        # unit preproc
+        pp_unit_features = []
+        pp_unit_features.append(obs['units'][:, 0:1])   # unit ids
+        pp_unit_features.append(tf.one_hot(obs['units'][:, 1] - 1, 4))    # alliance: self = 1, ally = 2, neutral, enemy
+        pp_unit_features.append(obs['units'][:, 2:5])   # health / shield / energy
+        pp_unit_features.append(obs['units'][:, 5] / float(self.config.screen_size) - 0.5)  # x pos
+        pp_unit_features.append(obs['units'][:, 6] / float(self.config.screen_size) - 0.5)  # y pos
+        pp_unit_features.append(obs['units'][:, 7] / 5.0 - 0.5)  # radius: biggest units (command centers) have radius of 5
+        pp_unit_features.append(obs['units'][:, 8:12])   # is_selected / is_blip / build_progress / is_powered
+        pp_unit_features.append(obs['units'][:, 12] / 1800.0 - 0.5)     # mineral count
+        pp_unit_features.append(obs['units'][:, 13] / 2250.0 - 0.5)     # vespene count
+        pp_unit_features.append(obs['units'][:, 14] / 8.0 - 0.5)        # cargo taken
+        pp_unit_features.append(obs['units'][:, 15] / 8.0 - 0.5)        # cargo max
+        pp_unit_features.append(obs['units'][:, 16:19])     # is_flying / is_burrowed / is_in_cargo
+        pp_unit_features.append(tf.one_hot(obs['units'][:, 19] - 1, 4))     # cloak: Cloaked = 1, CloakedDetected = 2, NotCloaked = 3, Unknown = 4, -1 so its 0 indexed
+        pp_unit_features.append(obs['units'][:, 20:21])     # is_hallucination
+        pp_unit_features.append(obs['units'][:, 21] / 3.0 - 0.5)        # attack upgrade
+        pp_unit_features.append(obs['units'][:, 22] / 3.0 - 0.5)        # armour upgrade
+        pp_unit_features.append(obs['units'][:, 23] / 3.0 - 0.5)        # shield upgrade
+        pp_unit_features.append(obs['units'][:, 24:63])
+
         obs['reward'] = getattr(tf, self.config.clip_rewards)(obs['reward'])
         if 'discount' in obs:
           obs['discount'] *= self.config.discount
