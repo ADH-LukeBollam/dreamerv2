@@ -169,11 +169,16 @@ class WorldModel(common.Module):
     @tf.function
     def preprocess(self, obs):
         dtype = prec.global_policy().compute_dtype
-        # obs = obs.copy()
+        obs = obs.copy()
+
+        screen_vis = tf.one_hot(obs['screen'][:, :, :, :, 0], 4, dtype=dtype)
+        screen_height = tf.cast(obs['screen'][:, :, :, :, 1:2], dtype) / 255.0 - 0.5
+        obs['screen'] = tf.concat([screen_vis, screen_height, tf.cast(obs['screen'][:, :, :, :, 2:5], dtype)], axis=4)
+
         # obs['image'] = tf.cast(obs['image'], dtype) / 255.0 - 0.5
-        # obs['reward'] = getattr(tf, self.config.clip_rewards)(obs['reward'])
-        # if 'discount' in obs:
-        #   obs['discount'] *= self.config.discount
+        obs['reward'] = getattr(tf, self.config.clip_rewards)(obs['reward'])
+        if 'discount' in obs:
+          obs['discount'] *= self.config.discount
         return obs
 
     @tf.function

@@ -16,8 +16,7 @@ class Sc2RandomAgent:
         arg_flattened = []
 
         for i in range(num_steps):
-            av_act_count = obs['available_actions_count'][0][0]
-            av_act = obs['available_actions'][0][0:av_act_count]
+            av_act = np.squeeze(np.argwhere(obs['available_actions'][0]))
             function_id = np.random.choice(av_act)
             function_ids.append(np.array([function_id], dtype=np.int))
 

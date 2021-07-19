@@ -1351,7 +1351,7 @@ class Features(object):
 
             features = [
                 # Match unit_vec order
-                self.unit_embed_lookup[u.unit_type],
+                u.unit_type,
                 u.alliance,  # Self = 1, Ally = 2, Neutral = 3, Enemy = 4
                 u.health,
                 u.shield,
@@ -1477,7 +1477,7 @@ class Features(object):
             features = []
             for v in u.passengers:
                 features.append([
-                    self.unit_embed_lookup[v.unit_type],
+                    v.unit_type,
                     u.alliance,  # Self = 1, Ally = 2, Neutral = 3, Enemy = 4
                     v.health,
                     v.shield,

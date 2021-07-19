@@ -6,7 +6,6 @@ import pathlib
 import sys
 import warnings
 
-from pysc2.agents.base_agent import BaseAgent
 from sc2_random_agent import Sc2RandomAgent
 
 try:
@@ -27,7 +26,7 @@ import numpy as np
 import ruamel.yaml as yaml
 import tensorflow as tf
 
-import agent
+import agent_sc2
 import elements
 import common
 
@@ -86,7 +85,7 @@ def make_env(mode):
             life_done=False, sticky_actions=True, all_actions=True)
         env = common.OneHotAction(env)
     elif suite == 'sc2':
-        env = common.Sc2(task, 84, 64, 22, 0, False, True)
+        env = common.Sc2(task, 84, 64, 22, 0, False, False)
     else:
         raise NotImplementedError(suite)
     env = common.TimeLimit(env, config.time_limit)
@@ -130,7 +129,7 @@ if prefill:
 print('Create agent.')
 train_dataset = iter(train_replay.dataset(**config.dataset))
 eval_dataset = iter(eval_replay.dataset(**config.dataset))
-agnt = agent.Agent(config, logger, action_space, step, train_dataset)
+agnt = agent_sc2.Sc2Agent(config, logger, action_space, step, train_dataset)
 if (logdir / 'variables.pkl').exists():
     agnt.load(logdir / 'variables.pkl')
 else:

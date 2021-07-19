@@ -23,6 +23,7 @@ import enum
 # pylint: disable=invalid-name
 class Neutral(enum.IntEnum):
     """Neutral units."""
+    NoUnit = 0  # add this to simplify embedding a 'pad' unit
     BattleStationMineralField = 886
     BattleStationMineralField750 = 887
     CarrionBird = 322

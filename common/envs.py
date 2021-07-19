@@ -6,6 +6,7 @@ import numpy as np
 
 from pysc2.env import sc2_env, available_actions_printer
 from pysc2.lib import actions
+from pysc2.lib.actions import get_action_embed_lookup
 from pysc2.lib.buffs import get_buff_embed_lookup
 from pysc2.lib.features import ScreenFeatures, Player, FeatureUnit
 from pysc2.lib.units import get_unit_embed_lookup
@@ -156,6 +157,7 @@ class Sc2:
         self._env = env
         self.unit_embed_lookup = get_unit_embed_lookup()
         self.buff_embed_lookup = get_buff_embed_lookup()
+        self.action_embed_lookup = get_action_embed_lookup()
 
     @property
     def available_actions(self):
@@ -211,15 +213,15 @@ class Sc2:
         # store available actions, pad up to 30
         actions_pad_size = 30
         av_actions = timestep.observation.available_actions
-        obs['available_actions_count'] = np.array([np.size(av_actions, 0)])
-        action_pad = actions_pad_size - np.size(av_actions, 0)
-        obs['available_actions'] = np.concatenate([av_actions, np.zeros(action_pad, dtype=np.int)])
+        action_categorical = np.zeros(len(self.action_embed_lookup), dtype=np.int)
+        action_categorical[av_actions] = 1
+        obs['available_actions'] = action_categorical
 
         # screen features
         screen_feat = timestep.observation.feature_screen
         obs['screen'] = np.stack([screen_feat.visibility_map,
-                                  screen_feat.creep,
                                   screen_feat.height_map,
+                                  screen_feat.creep,
                                   screen_feat.buildable,
                                   screen_feat.pathable],
                                  axis=2)
@@ -242,76 +244,79 @@ class Sc2:
         # units on the screen => limit to 200
         size = 200
         units = timestep.observation.feature_units
-        units = units[:, [FeatureUnit.unit_type,
-                          FeatureUnit.alliance,
-                          FeatureUnit.health_ratio,
-                          FeatureUnit.shield_ratio,
-                          FeatureUnit.energy_ratio,
-                          FeatureUnit.x,
-                          FeatureUnit.y,
-                          FeatureUnit.radius,
-                          FeatureUnit.is_selected,
-                          FeatureUnit.is_blip,
-                          FeatureUnit.build_progress,
-                          FeatureUnit.is_powered,
-                          FeatureUnit.mineral_contents,
-                          FeatureUnit.vespene_contents,
-                          FeatureUnit.cargo_space_taken,
-                          FeatureUnit.cargo_space_max,
-                          FeatureUnit.is_flying,
-                          FeatureUnit.is_burrowed,
-                          FeatureUnit.is_in_cargo,
-                          FeatureUnit.cloak,
-                          FeatureUnit.hallucination,
-                          FeatureUnit.attack_upgrade_level,
-                          FeatureUnit.armor_upgrade_level,
-                          FeatureUnit.shield_upgrade_level,
-                          FeatureUnit.Vespene_carry,
-                          FeatureUnit.Blinding_cloud,
-                          FeatureUnit.Hold_fire,
-                          FeatureUnit.Cloak_buff,
-                          FeatureUnit.Stim,
-                          FeatureUnit.CarryHighYieldMineralFieldMinerals,
-                          FeatureUnit.CarryMineralFieldMinerals,
-                          FeatureUnit.ChannelSnipeCombat,
-                          FeatureUnit.Charging,
-                          FeatureUnit.ChronoBoostEnergyCost,
-                          FeatureUnit.CloakFieldEffect,
-                          FeatureUnit.Contaminated,
-                          FeatureUnit.EMPDecloak,
-                          FeatureUnit.FungalGrowth,
-                          FeatureUnit.GravitonBeam,
-                          FeatureUnit.GuardianShield,
-                          FeatureUnit.ImmortalOverload,
-                          FeatureUnit.InhibitorZoneTemporalField,
-                          FeatureUnit.LockOn,
-                          FeatureUnit.MedivacSpeedBoost,
-                          FeatureUnit.NeuralParasite,
-                          FeatureUnit.OracleRevelation,
-                          FeatureUnit.OracleStasisTrapTarget,
-                          FeatureUnit.OracleWeapon,
-                          FeatureUnit.ParasiticBomb,
-                          FeatureUnit.ParasiticBombSecondaryUnitSearch,
-                          FeatureUnit.ParasiticBombUnitKU,
-                          FeatureUnit.PowerUserWarpable,
-                          FeatureUnit.PsiStorm,
-                          FeatureUnit.QueenSpawnLarvaTimer,
-                          FeatureUnit.RavenScramblerMissile,
-                          FeatureUnit.RavenShredderMissileArmorReduction,
-                          FeatureUnit.RavenShredderMissileTint,
-                          FeatureUnit.Slow,
-                          FeatureUnit.SupplyDrop,
-                          FeatureUnit.TemporalField,
-                          FeatureUnit.ViperConsumeStructure,
-                          FeatureUnit.VoidRaySpeedUpgrade,
-                          FeatureUnit.VoidRaySwarmDamageBoost
-                          ]]
+        unit_type_ids = list(units[:, 0])
 
-        obs['unit_count'] = np.array([np.size(units, 0)])
-        unit_dim = size - np.size(units, 0)
-        feature_dim = np.size(units, 1)
+        unit_embed_ids = np.expand_dims(np.array([self.unit_embed_lookup[int(x)] for x in unit_type_ids]), 1)
+        unit_features = units[:, [FeatureUnit.alliance,
+                                   FeatureUnit.health_ratio,
+                                   FeatureUnit.shield_ratio,
+                                   FeatureUnit.energy_ratio,
+                                   FeatureUnit.x,
+                                   FeatureUnit.y,
+                                   FeatureUnit.radius,
+                                   FeatureUnit.is_selected,
+                                   FeatureUnit.is_blip,
+                                   FeatureUnit.build_progress,
+                                   FeatureUnit.is_powered,
+                                   FeatureUnit.mineral_contents,
+                                   FeatureUnit.vespene_contents,
+                                   FeatureUnit.cargo_space_taken,
+                                   FeatureUnit.cargo_space_max,
+                                   FeatureUnit.is_flying,
+                                   FeatureUnit.is_burrowed,
+                                   FeatureUnit.is_in_cargo,
+                                   FeatureUnit.cloak,
+                                   FeatureUnit.hallucination,
+                                   FeatureUnit.attack_upgrade_level,
+                                   FeatureUnit.armor_upgrade_level,
+                                   FeatureUnit.shield_upgrade_level,
+                                   FeatureUnit.Vespene_carry,
+                                   FeatureUnit.Blinding_cloud,
+                                   FeatureUnit.Hold_fire,
+                                   FeatureUnit.Cloak_buff,
+                                   FeatureUnit.Stim,
+                                   FeatureUnit.CarryHighYieldMineralFieldMinerals,
+                                   FeatureUnit.CarryMineralFieldMinerals,
+                                   FeatureUnit.ChannelSnipeCombat,
+                                   FeatureUnit.Charging,
+                                   FeatureUnit.ChronoBoostEnergyCost,
+                                   FeatureUnit.CloakFieldEffect,
+                                   FeatureUnit.Contaminated,
+                                   FeatureUnit.EMPDecloak,
+                                   FeatureUnit.FungalGrowth,
+                                   FeatureUnit.GravitonBeam,
+                                   FeatureUnit.GuardianShield,
+                                   FeatureUnit.ImmortalOverload,
+                                   FeatureUnit.InhibitorZoneTemporalField,
+                                   FeatureUnit.LockOn,
+                                   FeatureUnit.MedivacSpeedBoost,
+                                   FeatureUnit.NeuralParasite,
+                                   FeatureUnit.OracleRevelation,
+                                   FeatureUnit.OracleStasisTrapTarget,
+                                   FeatureUnit.OracleWeapon,
+                                   FeatureUnit.ParasiticBomb,
+                                   FeatureUnit.ParasiticBombSecondaryUnitSearch,
+                                   FeatureUnit.ParasiticBombUnitKU,
+                                   FeatureUnit.PowerUserWarpable,
+                                   FeatureUnit.PsiStorm,
+                                   FeatureUnit.QueenSpawnLarvaTimer,
+                                   FeatureUnit.RavenScramblerMissile,
+                                   FeatureUnit.RavenShredderMissileArmorReduction,
+                                   FeatureUnit.RavenShredderMissileTint,
+                                   FeatureUnit.Slow,
+                                   FeatureUnit.SupplyDrop,
+                                   FeatureUnit.TemporalField,
+                                   FeatureUnit.ViperConsumeStructure,
+                                   FeatureUnit.VoidRaySpeedUpgrade,
+                                   FeatureUnit.VoidRaySwarmDamageBoost
+                                   ]]
 
-        obs['units'] = np.concatenate([units, np.zeros((unit_dim, feature_dim))])
+
+        units_out = np.concatenate([unit_embed_ids, unit_features], 1)
+
+        unit_dim = size - np.size(units_out, 0)
+        feature_dim = np.size(units_out, 1)
+        obs['units'] = np.concatenate([units_out, np.zeros((unit_dim, feature_dim))])
 
         return obs
 

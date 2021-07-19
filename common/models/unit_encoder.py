@@ -1,21 +1,29 @@
 import tensorflow as tf
+
+import common
 from models.set_prior import SetPrior
 from models.size_predictor import SizePredictor
 from models.set_transformer import TransformerLayer, PoolingMultiheadAttention
 from pysc2.lib.units import get_unit_embed_lookup
 
 
-class PointwiseProcessing(tf.keras.layers.Layer):
-    def __init__(self, preprocesing_dim, out_dim):
-        super(PointwiseProcessing, self).__init__()
+class UnitProcessing(tf.keras.layers.Layer):
+    def __init__(self, preprocesing_dim, out_dim, unit_embedding_dim):
+        super(UnitProcessing, self).__init__()
+        self.preprocesing_dim = preprocesing_dim
+        self.out_dim = out_dim
+        self.unit_embedding_dim = unit_embedding_dim
 
-        num_unit_types = len(get_unit_embed_lookup())
-        self.type_embedding = tf.keras.layers.Embedding(num_unit_types, 16)
+        num_unit_types = len(set(get_unit_embed_lookup().values()))
+        self.type_embedding = tf.keras.layers.Embedding(num_unit_types, unit_embedding_dim)
 
         self.conv1 = tf.keras.layers.Conv1D(preprocesing_dim, 1, kernel_initializer='glorot_uniform', use_bias=True)
         self.conv2 = tf.keras.layers.Conv1D(out_dim, 1, kernel_initializer='glorot_uniform', use_bias=True)
 
-    def call(self, set):
+    def call(self, units):
+        unit_types = units[:, 0]
+        embedded_types = self.type_embedding(unit_types)
+
         x = self.conv1(set)
         x = tf.nn.leaky_relu(x)
         x = self.conv2(x)
@@ -23,11 +31,11 @@ class PointwiseProcessing(tf.keras.layers.Layer):
         return x
 
 
-class SetEncoder(tf.keras.layers.Layer):
-    def __init__(self, preprocesing_dim, num_layers, trans_dim, num_heads):
-        super(SetEncoder, self).__init__()
+class UnitEncoder(common.Module):
+    def __init__(self, preprocesing_dim=64, num_layers=2, trans_dim=256, num_heads=4, unit_embedding_dim=16):
+        super(UnitEncoder, self).__init__()
 
-        self.pointwise_processing = PointwiseProcessing(preprocesing_dim, trans_dim)
+        self.pointwise_processing = UnitProcessing(preprocesing_dim, trans_dim, unit_embedding_dim)
 
         self.num_layers = num_layers
         self.transformer = [TransformerLayer(trans_dim, num_heads) for _ in range(num_layers)]
@@ -37,7 +45,9 @@ class SetEncoder(tf.keras.layers.Layer):
         # get the transformer mask []
         masked_values = tf.reshape(tf.cast(tf.math.logical_not(tf.sequence_mask(set_sizes, self.max_set_size)), tf.float32), [-1, 1, 1, self.max_set_size])
 
-        x = self.pointwise_processing(set)
+
+
+        x = self.pointwise_processing(sets)
 
         for i in range(self.num_layers):
             x = self.transformer[i](x, x, masked_values)
@@ -77,7 +87,7 @@ class SetDecoder(tf.keras.Model):
 
         self._prior = SetPrior(num_element_features)
 
-        self._encoder = SetEncoder(encoder_latent, transformer_layers, transformer_dim, transformer_num_heads)
+        self._encoder = UnitEncoder(encoder_latent, transformer_layers, transformer_dim, transformer_num_heads)
         self._decoder = SetDecoder(transformer_layers, transformer_dim, transformer_num_heads)
 
         # initialise the output to predict points at the center of our canvas

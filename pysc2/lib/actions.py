@@ -1867,3 +1867,14 @@ class ValidActions(collections.namedtuple(
 
   def __reduce__(self):
     return self.__class__, tuple(self)
+
+
+def get_action_embed_lookup():
+    lookup = {}
+    index = 0
+
+    for f in _FUNCTIONS:
+        lookup[int(f.id)] = index
+        index += 1
+
+    return lookup
