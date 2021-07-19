@@ -118,7 +118,7 @@ sc2:
   loss_scales.kl: 0.1
   loss_scales.discount: 5.0
   .*\.wd$: 1e-6
-  grad_heads: [ available_actions_count, available_actions, screen, mini, player, unit_count, units, reward, discount ]
+  grad_heads: [ available_actions, screen, mini, player, units, reward, discount ]
 
 dmc:
 
