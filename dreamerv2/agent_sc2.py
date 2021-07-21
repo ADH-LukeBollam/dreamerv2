@@ -170,37 +170,52 @@ class WorldModel(common.Module):
         obs = obs.copy()
 
         # screen preproc
-        screen_vis = tf.one_hot(obs['screen'][:, :, :, :, 0], 3, dtype=dtype)
-        screen_height = tf.cast(obs['screen'][:, :, :, :, 1:2], dtype) / 255.0 - 0.5
-        obs['screen'] = tf.concat([screen_vis, screen_height, tf.cast(obs['screen'][:, :, :, :, 2:5], dtype)], axis=4)
+        pp_screen_feat = []
+        pp_screen_feat.append(tf.one_hot(obs['screen'][:, :, :, :, 0], 3, dtype=tf.float32))    # screen visibility
+        pp_screen_feat.append(obs['screen'][:, :, :, :, 1:2] / 255.0 - 0.5)                     # screen height
+        pp_screen_feat.append(obs['screen'][:, :, :, :, 2:5])                                   # creep / buildable / pathable
+        obs['screen'] = tf.cast(tf.concat(pp_screen_feat, axis=4), dtype=dtype)
 
         # minimap preproc
-        mini_vis = tf.one_hot(obs['mini'][:, :, :, :, 0], 4, dtype=dtype)
-        mini_height = tf.cast(obs['mini'][:, :, :, :, 1:2], dtype) / 255.0 - 0.5
-        mini_relative = tf.one_hot(obs['mini'][:, :, :, :, 2], 5, dtype=dtype)
-        obs['mini'] = tf.concat([mini_vis, mini_height, mini_relative, tf.cast(obs['mini'][:, :, :, :, 2:5], dtype)], axis=4)
+        pp_mini_feat = []
+        pp_mini_feat.append(tf.one_hot(obs['mini'][:, :, :, :, 0], 4, dtype=tf.float32))    # minimap visibility
+        pp_mini_feat.append(obs['mini'][:, :, :, :, 1:2] / 255.0 - 0.5)                     # minimap height
+        pp_mini_feat.append(tf.one_hot(obs['mini'][:, :, :, :, 2], 5, dtype=tf.float32))    # minimap player relative unit alliance
+        pp_mini_feat.append(obs['mini'][:, :, :, :, 3:7] * 1.0)                             # creep / buildable / pathable / camera
+        obs['mini'] = tf.cast(tf.concat(pp_mini_feat, axis=4), dtype=dtype)
 
         # unit preproc
         pp_unit_features = []
-        pp_unit_features.append(obs['units'][:, :, :, 0:1])   # unit ids
-        pp_unit_features.append(tf.one_hot(tf.cast(obs['units'][:, :, :, 1], tf.int32) - 1, 4, dtype=dtype))    # alliance: self = 1, ally = 2, neutral, enemy
-        pp_unit_features.append(obs['units'][:, :, :, 2:5])   # health / shield / energy
+        pp_unit_features.append(obs['units'][:, :, :, 0:1] * 1.0)   # unit ids
+        pp_unit_features.append(tf.one_hot(tf.cast(obs['units'][:, :, :, 1], tf.int32) - 1, 4, dtype=tf.float32))    # alliance: self = 1, ally = 2, neutral, enemy
+        pp_unit_features.append(obs['units'][:, :, :, 2:5] * 1.0)   # health / shield / energy
         pp_unit_features.append(obs['units'][:, :, :, 5:6] / float(self.config.screen_size) - 0.5)  # x pos
         pp_unit_features.append(obs['units'][:, :, :, 6:7] / float(self.config.screen_size) - 0.5)  # y pos
         pp_unit_features.append(obs['units'][:, :, :, 7:8] / 5.0 - 0.5)  # radius: biggest units (command centers) have radius of 5
-        pp_unit_features.append(obs['units'][:, :, :, 8:12])   # is_selected / is_blip / build_progress / is_powered
+        pp_unit_features.append(obs['units'][:, :, :, 8:12] * 1.0)   # is_selected / is_blip / build_progress / is_powered
         pp_unit_features.append(obs['units'][:, :, :, 12:13] / 1800.0 - 0.5)     # mineral count
         pp_unit_features.append(obs['units'][:, :, :, 13:14] / 2250.0 - 0.5)     # vespene count
         pp_unit_features.append(obs['units'][:, :, :, 14:15] / 8.0 - 0.5)        # cargo taken
         pp_unit_features.append(obs['units'][:, :, :, 15:16] / 8.0 - 0.5)        # cargo max
         pp_unit_features.append(obs['units'][:, :, :, 16:19])     # is_flying / is_burrowed / is_in_cargo
-        pp_unit_features.append(tf.one_hot(tf.cast(obs['units'][:, :, :, 19], tf.int32) - 1, 4, dtype=dtype))     # cloak: Cloaked = 1, CloakedDetected = 2, NotCloaked = 3, Unknown = 4, -1 so its 0 indexed
-        pp_unit_features.append(obs['units'][:, :, :, 20:21])     # is_hallucination
+        pp_unit_features.append(tf.one_hot(tf.cast(obs['units'][:, :, :, 19], tf.int32) - 1, 4, dtype=tf.float32))     # cloak: Cloaked = 1, CloakedDetected = 2, NotCloaked = 3, Unknown = 4, -1 so its 0 indexed
+        pp_unit_features.append(obs['units'][:, :, :, 20:21] * 1.0)     # is_hallucination
         pp_unit_features.append(obs['units'][:, :, :, 21:22] / 3.0 - 0.5)        # attack upgrade
         pp_unit_features.append(obs['units'][:, :, :, 22:23] / 3.0 - 0.5)        # armour upgrade
         pp_unit_features.append(obs['units'][:, :, :, 23:24] / 3.0 - 0.5)        # shield upgrade
-        pp_unit_features.append(obs['units'][:, :, :, 24:63])
-        obs['units'] = tf.concat(pp_unit_features, axis=3)
+        pp_unit_features.append(obs['units'][:, :, :, 24:63] * 1.0)             # boolean buffs list
+        obs['units'] = tf.cast(tf.concat(pp_unit_features, axis=3), dtype=dtype)
+
+        # player preproc
+        pp_player_features = []
+        pp_player_features.append(tf.sqrt(obs['player'][:, :, :, 0:1]) / 50)    # player minerals
+        pp_player_features.append(tf.sqrt(obs['player'][:, :, :, 1:2]) / 50)    # player gas
+        pp_player_features.append(obs['player'][:, :, :, 2:3] / 200)            # supply used
+        pp_player_features.append(obs['player'][:, :, :, 3:4] / 10)            # warp gates
+        pp_player_features.append(obs['player'][:, :, :, 4:5] / 20)            # larva count
+        obs['player'] = tf.cast(tf.concat(pp_player_features, axis=3), dtype=dtype)
+
+        obs['available_actions'] = tf.cast(obs['available_actions'], dtype=dtype)
 
         obs['reward'] = getattr(tf, self.config.clip_rewards)(obs['reward'])
         if 'discount' in obs:

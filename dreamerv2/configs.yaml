@@ -17,6 +17,8 @@ defaults:
   dataset: {batch: 50, length: 50, oversample_ends: True}
   precision: 16
   jit: True
+  screen_size: 84
+  mini_size: 64
 
   # Agent
   log_every: 1e4
@@ -97,8 +99,9 @@ atari:
 sc2:
 
   task: CollectMineralShards
+  screen_size: 84
+  mini_size: 64
   time_limit: 108000  # 30 minutes of game play.
-  action_repeat: 4
   steps: 2e8
   eval_every: 1e5
   log_every: 1e5

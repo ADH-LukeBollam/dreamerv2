@@ -239,7 +239,12 @@ class Sc2:
 
         # player features
         player_feat = timestep.observation.player
-        obs['player'] = player_feat[[Player.minerals, Player.vespene, Player.food_used, Player.food_cap, Player.larva_count, Player.warp_gate_count]]
+        obs['player'] = player_feat[[Player.minerals,
+                                     Player.vespene,
+                                     Player.food_used,
+                                     Player.food_cap,
+                                     Player.larva_count,
+                                     Player.warp_gate_count]]
 
         # units on the screen => limit to 200
         size = 200
