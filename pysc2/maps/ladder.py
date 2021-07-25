@@ -27,9 +27,9 @@ from pysc2.maps import lib
 
 
 class Ladder(lib.Map):
-  players = 2
-  game_steps_per_episode = 16 * 60 * 30  # 30 minute limit.
-  download = "https://github.com/Blizzard/s2client-proto#map-packs"
+    players = 2
+    game_steps_per_episode = 16 * 60 * 30  # 30 minute limit.
+    download = "https://github.com/Blizzard/s2client-proto#map-packs"
 
 
 ladder_seasons = [
@@ -44,11 +44,11 @@ ladder_seasons = [
     "Ladder2019Season1",
     "Ladder2019Season2",
     "Ladder2019Season3",
+    "S11Maps"
 ]
 
 for name in ladder_seasons:
-  globals()[name] = type(name, (Ladder,), dict(directory=name))
-
+    globals()[name] = type(name, (Ladder,), dict(directory=name))
 
 # pylint: disable=bad-whitespace, undefined-variable
 # pytype: disable=name-error
@@ -101,6 +101,13 @@ ladder_maps = [
     (Ladder2019Season3, "Winter's Gate LE", 2),
     (Ladder2019Season3, "World of Sleepers LE", 2),
     (Ladder2019Season1, "Year Zero LE", 2),
+    (S11Maps, "Deathaura LE", 2),
+    (S11Maps, "Jagannatha LE", 2),
+    (S11Maps, "Lightshade LE", 2),
+    (S11Maps, "Oxide LE", 2),
+    (S11Maps, "PillarsofGold LE", 2),
+    (S11Maps, "Romanticide LE", 2),
+    (S11Maps, "Submarine LE", 2),
 
     # Disabled due to being renamed to Neo Seoul
     # (Ladder2018Season1, "Blackpink LE", 2),
@@ -111,8 +118,6 @@ ladder_maps = [
 # Create the classes dynamically, putting them into the module scope. They all
 # inherit from a parent and set the players based on the map filename.
 for parent, bnet, players in ladder_maps:
-  name = re.sub(r"[ '-]|[LTRS]E$", "", bnet)
-  map_file = re.sub(r"[ ']", "", bnet)
-  globals()[name] = type(name, (parent,), dict(
-      filename=map_file, players=players, battle_net=bnet))
-
+    name = re.sub(r"[ '-]|[LTRS]E$", "", bnet)
+    map_file = re.sub(r"[ ']", "", bnet)
+    globals()[name] = type(name, (parent,), dict(filename=map_file, players=players, battle_net=bnet))

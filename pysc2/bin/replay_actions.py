@@ -49,7 +49,7 @@ flags.DEFINE_integer("parallel", 1, "How many instances to run in parallel.")
 flags.DEFINE_integer("step_mul", 8, "How many game steps per observation.")
 flags.DEFINE_string("replays", None, "Path to a directory of replays.")
 flags.mark_flag_as_required("replays")
-
+FLAGS(sys.argv)
 
 size = point.Point(16, 16)
 interface = sc_pb.InterfaceOptions(
@@ -178,7 +178,7 @@ def valid_replay(info, ping):
     # Probably corrupt, or just not interesting.
     return False
   for p in info.player_info:
-    if p.player_apm < 10 or p.player_mmr < 1000:
+    if p.player_apm < 10:
       # Low APM = player just standing around.
       # Low MMR = corrupt replay or player who is weak.
       return False
@@ -246,8 +246,8 @@ class ReplayProcessor(multiprocessing.Process):
             finally:
               self.replay_queue.task_done()
           self._update_stage("shutdown")
-      except (protocol.ConnectionError, protocol.ProtocolError,
-              remote_controller.RequestError):
+      except (protocol.ConnectionError, protocol.ProtocolError, remote_controller.RequestError) as e:
+        print(e)
         self.stats.replay_stats.crashing_replays.add(replay_name)
       except KeyboardInterrupt:
         return

@@ -34,7 +34,7 @@ def get_data():
   run_config = run_configs.get()
 
   with run_config.start(want_rgb=False) as controller:
-    m = maps.get("Sequencer")  # Arbitrary ladder map.
+    m = maps.get("Deathaura")  # Arbitrary ladder map.
     create = sc_pb.RequestCreateGame(local_map=sc_pb.LocalMap(
         map_path=m.path, map_data=m.data(run_config)))
     create.player_setup.add(type=sc_pb.Participant)

@@ -33,7 +33,8 @@ from s2clientprotocol import sc2api_pb2 as sc_pb
 
 
 flags.DEFINE_enum("command", None, ["csv", "python"], "What to generate.")
-flags.DEFINE_string("map", "Acropolis", "Which map to use.")
+flags.DEFINE_string("map", "Deathaura", "Which map to use.")
+flags.DEFINE_bool("all", False, "show all abilities even not part of pysc2 yet")
 flags.mark_flag_as_required("command")
 FLAGS = flags.FLAGS
 
@@ -86,8 +87,7 @@ def generate_csv(data):
   for ability in sorted(six.itervalues(data.abilities),
                         key=lambda a: sort_key(data, a)):
     ab_id = ability.ability_id
-    if ab_id in skip_abilities or (ab_id not in data.general_abilities and
-                                   ab_id not in used_abilities):
+    if ab_id in skip_abilities or FLAGS.all is False and (ab_id not in data.general_abilities and ab_id not in used_abilities):
       continue
 
     general = ""
@@ -138,8 +138,7 @@ def generate_py_abilities(data):
   for ability in sorted(six.itervalues(data.abilities),
                         key=lambda a: sort_key(data, a)):
     ab_id = ability.ability_id
-    if ab_id in skip_abilities or (ab_id not in data.general_abilities and
-                                   ab_id not in used_abilities):
+    if ab_id in skip_abilities or FLAGS.all is False and (ab_id not in data.general_abilities and ab_id not in used_abilities):
       continue
 
     name = generate_name(ability).replace(" ", "_")

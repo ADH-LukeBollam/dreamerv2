@@ -20,12 +20,13 @@ from __future__ import print_function
 import enum
 
 
-# pylint: disable=invalid-name
 class Neutral(enum.IntEnum):
     """Neutral units."""
-    NoUnit = 0  # add this to simplify embedding a 'pad' unit
+    AccelerationZoneLarge = 1987
+    AccelerationZoneSmall = 1985
     BattleStationMineralField = 886
     BattleStationMineralField750 = 887
+    BlimpMengskACGluescreenDummy = 1957
     CarrionBird = 322
     CleaningBot = 612
     CollapsibleRockTower = 609
@@ -71,15 +72,14 @@ class Neutral(enum.IntEnum):
     DestructibleRockEx1HorizontalHuge = 643
     DestructibleRockEx1VerticalHuge = 642
     Dog = 336
-    InhibitorZoneMedium = 1958
-    InhibitorZoneSmall = 1957
     KarakFemale = 324
     LabBot = 661
     LabMineralField = 665
     LabMineralField750 = 666
     Lyote = 321
+    MarauderMengskACGluescreenDummy = 1958
+    MedivacMengskACGluescreenDummy = 1956
     MineralField = 341
-    MineralField450 = 1961
     MineralField750 = 483
     ProtossVespeneGeyser = 608
     PurifierMineralField = 884
@@ -93,7 +93,10 @@ class Neutral(enum.IntEnum):
     RichVespeneGeyser = 344
     Scantipede = 335
     ShakurasVespeneGeyser = 881
+    SiegeTankMengskACGluescreenDummy = 1960
     SpacePlatformGeyser = 343
+    ThorMengskACGluescreenDummy = 1961
+    TrooperMengskACGluescreenDummy = 1955
     UnbuildableBricksDestructible = 473
     UnbuildablePlatesDestructible = 474
     UnbuildableRocksDestructible = 472
@@ -102,7 +105,6 @@ class Neutral(enum.IntEnum):
     XelNagaDestructibleBlocker8NE = 1904
     XelNagaDestructibleBlocker8SW = 1908
     XelNagaTower = 149
-    FloatingMineralPickup = 1680
 
 
 class Protoss(enum.IntEnum):
@@ -111,7 +113,6 @@ class Protoss(enum.IntEnum):
     AdeptPhaseShift = 801
     Archon = 141
     Assimilator = 61
-    AssimilatorRich = 1955
     Carrier = 79
     Colossus = 4
     CyberneticsCore = 72
@@ -130,8 +131,9 @@ class Protoss(enum.IntEnum):
     MothershipCore = 488
     Nexus = 59
     Observer = 82
-    ObserverSurveillanceMode = 1911
+    ObserverSiegeMode = 1911
     Oracle = 495
+    OracleStasisTrap = 732
     Phoenix = 78
     PhotonCannon = 66
     Probe = 84
@@ -143,7 +145,6 @@ class Protoss(enum.IntEnum):
     ShieldBattery = 1910
     Stalker = 74
     Stargate = 67
-    StasisTrap = 732
     Tempest = 496
     TemplarArchive = 68
     TwilightCouncil = 65
@@ -179,7 +180,7 @@ class Terran(enum.IntEnum):
     GhostAlternate = 144
     GhostNova = 145
     Hellion = 53
-    Hellbat = 484
+    HellionTank = 484
     KD8Charge = 830
     Liberator = 689
     LiberatorAG = 734
@@ -194,11 +195,10 @@ class Terran(enum.IntEnum):
     PlanetaryFortress = 130
     PointDefenseDrone = 11
     Raven = 56
+    RavenRepairDrone = 1913
     Reactor = 6
     Reaper = 49
     Refinery = 20
-    RefineryRich = 1960
-    RepairDrone = 1913
     SCV = 45
     SensorTower = 25
     SiegeTank = 33
@@ -211,7 +211,7 @@ class Terran(enum.IntEnum):
     SupplyDepotLowered = 47
     TechLab = 5
     Thor = 52
-    ThorHighImpactMode = 691
+    ThorAP = 691
     VikingAssault = 34
     VikingFighter = 35
     WidowMine = 498
@@ -234,16 +234,15 @@ class Zerg(enum.IntEnum):
     ChangelingZealot = 13
     ChangelingZergling = 17
     ChangelingZerglingWings = 16
-    Cocoon = 103
     Corruptor = 112
     CreepTumor = 87
     CreepTumorBurrowed = 137
     CreepTumorQueen = 138
     Drone = 104
     DroneBurrowed = 116
+    Egg = 103
     EvolutionChamber = 90
     Extractor = 88
-    ExtractorRich = 1956
     GreaterSpire = 102
     Hatchery = 86
     Hive = 101
@@ -251,28 +250,27 @@ class Zerg(enum.IntEnum):
     HydraliskBurrowed = 117
     HydraliskDen = 91
     InfestationPit = 94
-    InfestedTerran = 7
-    InfestedTerranBurrowed = 120
-    InfestedTerranCocoon = 150
+    InfestedTerransEgg = 150
     Infestor = 111
     InfestorBurrowed = 127
+    InfestorTerran = 7
+    InfestorTerranBurrowed = 120
     Lair = 100
     Larva = 151
-    Locust = 489
-    LocustFlying = 693
-    Lurker = 502
-    LurkerBurrowed = 503
-    LurkerDen = 504
-    LurkerCocoon = 501
+    LocustMP = 489
+    LocustMPFlying = 693
+    LurkerDenMP = 504
+    LurkerMP = 502
+    LurkerMPBurrowed = 503
+    LurkerMPEgg = 501
     Mutalisk = 108
     NydusCanal = 142
     NydusNetwork = 95
     Overlord = 106
+    OverlordCocoon = 128
     OverlordTransport = 893
-    OverlordTransportCocoon = 892
     Overseer = 129
-    OverseerCocoon = 128
-    OverseerOversightMode = 1912
+    OverseerSiegeMode = 1912
     ParasiticBombDummy = 824
     Queen = 126
     QueenBurrowed = 125
@@ -288,8 +286,9 @@ class Zerg(enum.IntEnum):
     Spire = 92
     SporeCrawler = 99
     SporeCrawlerUprooted = 140
-    SwarmHost = 494
-    SwarmHostBurrowed = 493
+    SwarmHostBurrowedMP = 493
+    SwarmHostMP = 494
+    TransportOverlordCocoon = 892
     Ultralisk = 109
     UltraliskBurrowed = 131
     UltraliskCavern = 93
@@ -311,6 +310,10 @@ def get_unit_type(unit_id):
 def get_unit_embed_lookup():
     lookup = {}
     embed_index = 0
+
+    # add a 'no unit' so that we have something to use in our embedding layer when its a padded value
+    lookup[0] = 0
+    embed_index += 1
 
     for race in (Neutral, Protoss, Terran, Zerg):
         for unit_id in list(map(int, race)):

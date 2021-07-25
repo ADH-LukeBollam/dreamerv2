@@ -33,8 +33,7 @@ from six.moves import urllib
 from pysc2 import run_configs
 
 FLAGS = flags.FLAGS
-flags.DEFINE_string("bnet_base", None,
-                    "Path to a Battle.net directory to update.")
+flags.DEFINE_string("bnet_base", "C:\ProgramData\Blizzard Entertainment\Battle.net", "Path to a Battle.net directory to update.")
 
 DEPOT_URL_TEMPLATE = "http://us.depot.battle.net:1119/{hash}.{type}"
 

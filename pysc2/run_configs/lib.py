@@ -86,9 +86,8 @@ VERSIONS = version_dict([
     Version("4.9.3", 75025, "C305368C63621480462F8F516FB64374", None),
     Version("4.10.0", 75689, "B89B5D6FA7CBF6452E721311BFBC6CB2", None),
     Version("4.10.1", 75800, "DDFFF9EC4A171459A4F371C6CC189554", None),
-    Version("5.0.0", 81009, "", None),
-    Version("5.0.7", 84643, "10f76833fba50ad6c290de4f9c589611", None)
-    ## get new build info from C:\Program Files (x86)\StarCraft II\.build.info, not sure which hex to use for data version but guessing Build Key
+    Version("5.0.7", 84643, "'A389D1F7DF9DD792FBE980533B7119FF'", None)
+    ## get new build info from loading a replay into replay_actions.py
 ])
 
 
