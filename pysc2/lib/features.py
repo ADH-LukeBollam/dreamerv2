@@ -223,7 +223,7 @@ class FeatureUnit(enum.IntEnum):
     Vespene_carry = 46
     Blinding_cloud = 47
     Hold_fire = 48
-    Cloak_buff = 49
+    Cloak_ability = 49
     Stim = 50
     AmorphousArmorcloud = 51
     BatteryOvercharge = 52
@@ -1008,8 +1008,6 @@ class Features(object):
         self._buff_lookup = get_buff_embed_lookup()
         self._num_buffs = len(set(self._buff_lookup.values()))
 
-        self.unit_embed_lookup = get_unit_embed_lookup()
-
         if (aif.use_feature_units
             or aif.use_camera_position
             or aif.use_raw_units):
@@ -1335,7 +1333,7 @@ class Features(object):
         def get_addon_type(tag):
             if not tag_types:
                 for u in raw.units:
-                    tag_types[u.tag] = self.unit_embed_lookup[u.unit_type]
+                    tag_types[u.tag] = u.unit_type
             return tag_types.get(tag, 0)
 
         def full_unit_vec(u, pos_transform, is_raw=False):

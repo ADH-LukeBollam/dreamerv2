@@ -223,7 +223,8 @@ class Sc2:
                                   screen_feat.height_map,
                                   screen_feat.creep,
                                   screen_feat.buildable,
-                                  screen_feat.pathable],
+                                  screen_feat.pathable,
+                                  screen_feat.effects],
                                  axis=2)
 
         # minimap features
@@ -251,7 +252,7 @@ class Sc2:
         units = timestep.observation.feature_units
         unit_type_ids = list(units[:, 0])
 
-        unit_embed_ids = np.expand_dims(np.array([self.unit_embed_lookup[int(x)] for x in unit_type_ids]), 1)
+        unit_embed_ids = np.expand_dims(np.array([self.unit_embed_lookup[int(x)] for x in unit_type_ids], dtype=np.long), 1)
         unit_features = units[:, [FeatureUnit.alliance,
                                   FeatureUnit.health_ratio,
                                   FeatureUnit.shield_ratio,
@@ -280,8 +281,10 @@ class Sc2:
                                   FeatureUnit.Vespene_carry,
                                   FeatureUnit.Blinding_cloud,
                                   FeatureUnit.Hold_fire,
-                                  FeatureUnit.Cloak_buff,
+                                  FeatureUnit.Cloak_ability,
                                   FeatureUnit.Stim,
+                                  FeatureUnit.AmorphousArmorcloud,
+                                  FeatureUnit.BatteryOvercharge,
                                   FeatureUnit.CarryHighYieldMineralFieldMinerals,
                                   FeatureUnit.CarryMineralFieldMinerals,
                                   FeatureUnit.ChannelSnipeCombat,
@@ -322,7 +325,8 @@ class Sc2:
 
         unit_dim = size - np.size(units_out, 0)
         feature_dim = np.size(units_out, 1)
-        obs['units'] = np.concatenate([units_out, np.zeros((unit_dim, feature_dim))])
+        unit_padding = np.zeros((unit_dim, feature_dim), dtype=np.long)
+        obs['units'] = np.concatenate([units_out, unit_padding])
 
         return obs
 

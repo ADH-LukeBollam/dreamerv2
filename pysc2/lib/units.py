@@ -105,6 +105,7 @@ class Neutral(enum.IntEnum):
     XelNagaDestructibleBlocker8NE = 1904
     XelNagaDestructibleBlocker8SW = 1908
     XelNagaTower = 149
+    MineralPickup = 1680
 
 
 class Protoss(enum.IntEnum):
