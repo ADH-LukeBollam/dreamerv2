@@ -95,26 +95,12 @@ def select_larva(action, action_space):
     action.action_ui.select_larva.SetInParent()  # Adds the empty proto field.
 
 
-def select_unit(action, action_space, select_unit_act, select_unit_id):
-    """Select a specific unit from the multi-unit selection."""
-    del action_space
-    select = action.action_ui.multi_panel
-    select.type = select_unit_act
-    select.unit_index = select_unit_id
-
-
 def control_group(action, action_space, control_group_act, control_group_id):
     """Act on a control group, selecting, setting, etc."""
     del action_space
     select = action.action_ui.control_group
     select.action = control_group_act
     select.control_group_index = control_group_id
-
-
-def unload(action, action_space, unload_id):
-    """Unload a unit from a transport/bunker/nydus/etc."""
-    del action_space
-    action.action_ui.cargo_panel.unit_index = unload_id
 
 
 def build_queue(action, action_space, build_queue_id):
@@ -303,10 +289,8 @@ class Arguments(collections.namedtuple("Arguments", [
       select_point_act: What to do with the unit at the point.
       select_add: Whether to add the unit to the selection or replace it.
       select_unit_act: What to do when selecting a unit by id.
-      select_unit_id: Which unit to select by id.
       select_worker: What to do when selecting a worker.
       build_queue_id: Which build queue index to target.
-      unload_id: Which unit to target in a transport/nydus/command center.
     """
     __slots__ = ()
 
@@ -416,10 +400,8 @@ TYPES = Arguments.types(
         SELECT_POINT_ACT_OPTIONS, SelectPointAct),
     select_add=ArgumentType.enum(SELECT_ADD_OPTIONS, SelectAdd),
     select_unit_act=ArgumentType.enum(SELECT_UNIT_ACT_OPTIONS, SelectUnitAct),
-    select_unit_id=ArgumentType.scalar(500),  # Depends on current selection.
     select_worker=ArgumentType.enum(SELECT_WORKER_OPTIONS, SelectWorker),
     build_queue_id=ArgumentType.scalar(10),  # Depends on current build queue.
-    unload_id=ArgumentType.scalar(500),  # Depends on the current loaded units.
 )
 
 RAW_TYPES = RawArguments.types(
@@ -435,13 +417,11 @@ FUNCTION_TYPES = {
     move_camera: [TYPES.minimap],
     select_point: [TYPES.select_point_act, TYPES.screen],
     select_rect: [TYPES.select_add, TYPES.screen, TYPES.screen2],
-    select_unit: [TYPES.select_unit_act, TYPES.select_unit_id],
     control_group: [TYPES.control_group_act, TYPES.control_group_id],
     select_idle_worker: [TYPES.select_worker],
     select_army: [TYPES.select_add],
     select_warp_gates: [TYPES.select_add],
     select_larva: [],
-    unload: [TYPES.unload_id],
     build_queue: [TYPES.build_queue_id],
     cmd_quick: [TYPES.queued],
     cmd_screen: [TYPES.queued, TYPES.screen],
@@ -589,13 +569,11 @@ _FUNCTIONS = [
     Function.ui_func(2, "select_point", select_point),
     Function.ui_func(3, "select_rect", select_rect),
     Function.ui_func(4, "select_control_group", control_group),
-    Function.ui_func(5, "select_unit", select_unit, lambda obs: obs.ui_data.HasField("multi")),
-    Function.ui_func(6, "select_idle_worker", select_idle_worker, lambda obs: obs.player_common.idle_worker_count > 0),
-    Function.ui_func(7, "select_army", select_army, lambda obs: obs.player_common.army_count > 0),
-    Function.ui_func(8, "select_warp_gates", select_warp_gates, lambda obs: obs.player_common.warp_gate_count > 0),
-    Function.ui_func(9, "select_larva", select_larva, lambda obs: obs.player_common.larva_count > 0),
-    Function.ui_func(10, "unload", unload, lambda obs: obs.ui_data.HasField("cargo")),
-    Function.ui_func(11, "build_queue", build_queue, lambda obs: obs.ui_data.HasField("production")),
+    Function.ui_func(5, "select_idle_worker", select_idle_worker, lambda obs: obs.player_common.idle_worker_count > 0),
+    Function.ui_func(6, "select_army", select_army, lambda obs: obs.player_common.army_count > 0),
+    Function.ui_func(7, "select_warp_gates", select_warp_gates, lambda obs: obs.player_common.warp_gate_count > 0),
+    Function.ui_func(8, "select_larva", select_larva, lambda obs: obs.player_common.larva_count > 0),
+    Function.ui_func(9, "build_queue", build_queue, lambda obs: obs.ui_data.HasField("production")),
     # Everything below here is generated with gen_actions.py
     Function.ability(12, "Attack_screen", cmd_screen, 3674),
     Function.ability(13, "Attack_minimap", cmd_minimap, 3674),
@@ -1864,7 +1842,8 @@ def get_action_embed_lookup():
     index = 0
 
     for f in _FUNCTIONS:
-        lookup[int(f.id)] = index
-        index += 1
+        if f.general_id == 0:
+            lookup[int(f.id)] = index
+            index += 1
 
     return lookup
