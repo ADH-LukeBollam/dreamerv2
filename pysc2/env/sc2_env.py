@@ -445,6 +445,7 @@ class SC2Env(environment.Base):
                 features.features_from_game_info(
                         game_info=g, agent_interface_format=aif, map_name=self._map_name)
                 for g, aif in zip(self._game_info, self._interface_formats)]
+        pass
 
     @property
     def map_name(self):

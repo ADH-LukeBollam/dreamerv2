@@ -34,10 +34,10 @@ from s2clientprotocol import sc2api_pb2 as sc_pb
 
 flags.DEFINE_enum("command", None, ["csv", "python"], "What to generate.")
 flags.DEFINE_string("map", "Deathaura", "Which map to use.")
-flags.DEFINE_bool("all", False, "show all abilities even not part of pysc2 yet")
 flags.mark_flag_as_required("command")
 FLAGS = flags.FLAGS
 
+ui_func_len = 12
 
 def get_data():
   """Retrieve static data from the game."""
@@ -87,7 +87,7 @@ def generate_csv(data):
   for ability in sorted(six.itervalues(data.abilities),
                         key=lambda a: sort_key(data, a)):
     ab_id = ability.ability_id
-    if ab_id in skip_abilities or FLAGS.all is False and (ab_id not in data.general_abilities and ab_id not in used_abilities):
+    if ab_id in skip_abilities or (ab_id not in data.general_abilities and ab_id not in used_abilities):
       continue
 
     general = ""
@@ -134,11 +134,11 @@ def generate_py_abilities(data):
       args.append(general_id)
     print("    Function.ability(%s)," % ", ".join(str(v) for v in args))
 
-  func_ids = itertools.count(12)  # Leave room for the ui funcs.
+  func_ids = itertools.count(ui_func_len)  # Leave room for the ui funcs.
   for ability in sorted(six.itervalues(data.abilities),
                         key=lambda a: sort_key(data, a)):
     ab_id = ability.ability_id
-    if ab_id in skip_abilities or FLAGS.all is False and (ab_id not in data.general_abilities and ab_id not in used_abilities):
+    if ab_id in skip_abilities or (ab_id not in data.general_abilities and ab_id not in used_abilities):
       continue
 
     name = generate_name(ability).replace(" ", "_")
