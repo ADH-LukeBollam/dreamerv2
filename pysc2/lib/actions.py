@@ -272,7 +272,7 @@ class ArgumentType(collections.namedtuple(
 class Arguments(collections.namedtuple("Arguments", [
     "screen", "minimap", "screen2", "queued", "control_group_act",
     "control_group_id", "select_point_act", "select_add", "select_unit_act",
-    "select_unit_id", "select_worker", "build_queue_id", "unload_id"])):
+    "select_worker", "build_queue_id"])):
     """The full list of argument types.
 
     Take a look at TYPES and FUNCTION_TYPES for more details.
@@ -1845,5 +1845,33 @@ def get_action_embed_lookup():
         if f.general_id == 0:
             lookup[int(f.id)] = index
             index += 1
+
+    return lookup
+
+
+def get_args_indices_lookup(screen_size, minimap_size):
+    all_args = list(set([a for f in _FUNCTIONS for a in f.args]))
+    all_args.sort(key=lambda x: x.id)
+
+    lookup = {}
+    index = 0
+    for a in all_args:
+        # use one-hot encodings for screen and minimap positions
+        if 'screen' in a.name:
+            arg_size = screen_size * 2
+            arg_start = index
+            arg_end = index + arg_size
+            lookup[a.id] = (arg_start, arg_end)
+        elif 'minimap' in a.name:
+            arg_size = minimap_size * 2
+            arg_start = index
+            arg_end = index + arg_size
+            lookup[a.id] = (arg_start, arg_end)
+        else:
+            arg_size = sum(a.sizes)
+            arg_start = index
+            arg_end = index + arg_size
+            lookup[a.id] = (arg_start, arg_end)
+        index += arg_size
 
     return lookup

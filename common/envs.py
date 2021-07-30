@@ -6,7 +6,7 @@ import numpy as np
 
 from pysc2.env import sc2_env, available_actions_printer
 from pysc2.lib import actions
-from pysc2.lib.actions import get_action_embed_lookup
+from pysc2.lib.actions import get_action_embed_lookup, get_args_indices_lookup
 from pysc2.lib.buffs import get_buff_embed_lookup
 from pysc2.lib.features import ScreenFeatures, Player, FeatureUnit
 from pysc2.lib.units import get_unit_embed_lookup
@@ -137,6 +137,11 @@ class Atari:
 
 class Sc2:
     def __init__(self, map_name, screen_size, minimap_size, steps_per_action, steps_per_episode, fog, visualise):
+        self.unit_embed_lookup = get_unit_embed_lookup()
+        self.buff_embed_lookup = get_buff_embed_lookup()
+        self.action_embed_lookup = get_action_embed_lookup()
+        self.args_indices_lookup = get_args_indices_lookup(screen_size, minimap_size)
+
         from absl import flags
         flags.FLAGS.mark_as_parsed()
         env = sc2_env.SC2Env(
@@ -155,9 +160,7 @@ class Sc2:
             visualize=visualise)
         env = available_actions_printer.AvailableActionsPrinter(env)
         self._env = env
-        self.unit_embed_lookup = get_unit_embed_lookup()
-        self.buff_embed_lookup = get_buff_embed_lookup()
-        self.action_embed_lookup = get_action_embed_lookup()
+
 
     @property
     def available_actions(self):
