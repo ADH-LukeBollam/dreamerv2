@@ -150,42 +150,51 @@ class RSSM(common.Module):
 
 class Sc2Encoder(common.Module):
 
-    def __init__(self, depth=32, act=tf.nn.elu, kernels=(4, 4, 4, 4), keys=['image']):
-        self._act = getattr(tf.nn, act) if isinstance(act, str) else act
-        self._depth = depth
-        self._kernels = kernels
-        self._keys = keys
+    def __init__(self, act=tf.nn.elu, avl_action_units=(16, 16),
+                 screen_depth=32, screen_kernels=(4, 4, 4, 4),
+                 minimap_depth=32, minimap_kernels=(4, 4, 4, 4)):
+        self._avl_action_encoder = MlpEncoder('avl_action', act, avl_action_units)
+        self._screen_encoder = ConvEncoder('screen', screen_depth, act, screen_kernels)
+        self._minimap_encoder = ConvEncoder('minimap', minimap_depth, act, minimap_kernels)
 
     @tf.function
     def __call__(self, obs):
-        if tuple(self._keys) == ('image',):
-            x = tf.reshape(obs['image'], (-1,) + tuple(obs['image'].shape[-3:]))
-            for i, kernel in enumerate(self._kernels):
-                depth = 2 ** i * self._depth
-                x = self._act(self.get(f'h{i}', tfkl.Conv2D, depth, kernel, 2)(x))
-            x = tf.reshape(x, [x.shape[0], np.prod(x.shape[1:])])
-            shape = tf.concat([tf.shape(obs['image'])[:-3], [x.shape[-1]]], 0)
-            return tf.reshape(x, shape)
-        else:
-            dtype = prec.global_policy().compute_dtype
-            features = []
-            for key in self._keys:
-                value = tf.convert_to_tensor(obs[key])
-                if value.dtype.is_integer:
-                    value = tf.cast(value, dtype)
-                    semilog = tf.sign(value) * tf.math.log(1 + tf.abs(value))
-                    features.append(semilog[..., None])
-                elif len(obs[key].shape) >= 4:
-                    x = tf.reshape(obs['image'], (-1,) + tuple(obs['image'].shape[-3:]))
-                    for i, kernel in enumerate(self._kernels):
-                        depth = 2 ** i * self._depth
-                        x = self._act(self.get(f'h{i}', tfkl.Conv2D, depth, kernel, 2)(x))
-                    x = tf.reshape(x, [x.shape[0], np.prod(x.shape[1:])])
-                    shape = tf.concat([tf.shape(obs['image'])[:-3], [x.shape[-1]]], 0)
-                    features.append(tf.reshape(x, shape))
-                else:
-                    raise NotImplementedError((key, value.dtype, value.shape))
-            return tf.concat(features, -1)
+        avl_actions = self._avl_action_encoder(obs['available_actions'])
+        screen = self._screen_encoder(obs['screen'])
+        minimap = self._minimap_encoder(obs['mini'])
+        pass
+
+
+class MlpEncoder(common.Module):
+    def __init__(self, name_prefix, act=tf.nn.elu, units=(16, 16)):
+        self._name_prefix = name_prefix
+        self._act = getattr(tf.nn, act) if isinstance(act, str) else act
+        self._avl_actions_units = units
+
+    @tf.function
+    def __call__(self, inputs):
+        x = inputs
+        for i, width in enumerate(self._avl_actions_units):
+            x = self._act(self.get(f'{self._name_prefix}_h{i}', tfkl.Dense, width)(x))
+        return x
+
+
+class ConvEncoder(common.Module):
+    def __init__(self, name_prefix, depth, act, kernels):
+        self._name_prefix = name_prefix
+        self._act = getattr(tf.nn, act) if isinstance(act, str) else act
+        self._depth = depth
+        self._kernels = kernels
+
+    @tf.function
+    def __call__(self, inputs):
+        x = tf.reshape(inputs, (-1,) + tuple(inputs.shape[-3:]))
+        for i, kernel in enumerate(self._kernels):
+            depth = 2 ** i * self._depth
+            x = self._act(self.get(f'{self._name_prefix}_h{i}', tfkl.Conv2D, depth, kernel, 2)(x))
+        x = tf.reshape(x, [x.shape[0], np.prod(x.shape[1:])])
+        shape = tf.concat([tf.shape(inputs)[:-3], [x.shape[-1]]], 0)
+        return tf.reshape(x, shape)
 
 
 class ConvDecoder(common.Module):

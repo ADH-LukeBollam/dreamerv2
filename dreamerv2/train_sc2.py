@@ -30,7 +30,7 @@ import agent_sc2
 import elements
 import common
 
-configs = pathlib.Path(sys.argv[0]).parent / 'configs.yaml'
+configs = pathlib.Path(sys.argv[0]).parent / 'configs_sc2.yaml'
 configs = yaml.safe_load(configs.read_text())
 config = elements.Config(configs['defaults'])
 parsed, remaining = elements.FlagParser(configs=['defaults']).parse_known(
