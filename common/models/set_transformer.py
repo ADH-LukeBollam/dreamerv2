@@ -1,4 +1,5 @@
 import tensorflow as tf
+from tensorflow.keras.mixed_precision import experimental as prec
 
 
 # implementation based off https://www.tensorflow.org/tutorials/text/transformer
@@ -116,6 +117,7 @@ def scaled_dot_product_attention(q, k, v, mask):
 
     # scale matmul_qk
     dk = tf.cast(tf.shape(k)[-1], tf.float32)
+    matmul_qk = tf.cast(matmul_qk, tf.float32)   # use float32 for attention, not enough precision otherwise for masking operation to properly zero-out masked values
     scaled_attention_logits = matmul_qk / tf.math.sqrt(dk)
 
     if mask is not None:
@@ -123,7 +125,7 @@ def scaled_dot_product_attention(q, k, v, mask):
 
     # softmax is normalized on the last axis (seq_len_k) so that the scores
     # add up to 1.
-    attention_weights = tf.nn.softmax(scaled_attention_logits, axis=-1)  # (..., seq_len_q, seq_len_k)
+    attention_weights = tf.cast(tf.nn.softmax(scaled_attention_logits, axis=-1), v.dtype)  # (..., seq_len_q, seq_len_k)
 
     output = tf.matmul(attention_weights, v)  # (..., seq_len_q, depth_v)
 

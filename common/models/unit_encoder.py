@@ -5,6 +5,7 @@ from models.set_prior import SetPrior
 from models.size_predictor import SizePredictor
 from models.set_transformer import TransformerLayer, PoolingMultiheadAttention
 from pysc2.lib.units import get_unit_embed_lookup
+from tensorflow.keras.mixed_precision import experimental as prec
 
 
 class UnitProcessing(tf.keras.layers.Layer):
@@ -21,10 +22,12 @@ class UnitProcessing(tf.keras.layers.Layer):
         self.conv2 = tf.keras.layers.Conv1D(out_dim, 1, kernel_initializer='glorot_uniform', use_bias=True)
 
     def call(self, units):
-        unit_types = units[:, 0]
+        unit_types = units[:, :, 0]
         embedded_types = self.type_embedding(unit_types)
+        remaining_features = units[:, :, 1:]
+        embedded = tf.concat([embedded_types, remaining_features], axis=-1)
 
-        x = self.conv1(set)
+        x = self.conv1(embedded)
         x = tf.nn.leaky_relu(x)
         x = self.conv2(x)
 
@@ -41,20 +44,27 @@ class UnitEncoder(common.Module):
         self.transformer = [TransformerLayer(trans_dim, num_heads) for _ in range(num_layers)]
         self.transformer_pooling = PoolingMultiheadAttention(trans_dim, 1, 1)
 
-    def call(self, sets, set_sizes):
+    @tf.function
+    def __call__(self, sets):
+        # flatten our batch + timestep dimensions together
+        x = tf.reshape(sets, (-1,) + tuple(sets.shape[-2:]))
+
         # get the transformer mask []
-        masked_values = tf.reshape(tf.cast(tf.math.logical_not(tf.sequence_mask(set_sizes, self.max_set_size)), tf.float32), [-1, 1, 1, self.max_set_size])
+        seq = tf.cast(tf.math.equal(x[:, :, 0], 0), tf.float32)
+        masked_values = seq[:, tf.newaxis, tf.newaxis, :]
 
-
-
-        x = self.pointwise_processing(sets)
+        x = self.pointwise_processing(x)
 
         for i in range(self.num_layers):
             x = self.transformer[i](x, x, masked_values)
 
         merged = self.transformer_pooling(x, masked_values)
 
-        return merged  # (batch_size, input_seq_len, d_model)
+        # recover our batch and timestep dims
+        shape = tf.concat([tf.shape(sets)[:-2], [merged.shape[-1]]], 0)
+        merged = tf.reshape(merged, shape)
+
+        return merged
 
 
 class SetDecoder(tf.keras.layers.Layer):

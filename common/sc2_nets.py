@@ -3,8 +3,8 @@ import tensorflow as tf
 from tensorflow.keras import layers as tfkl
 from tensorflow_probability import distributions as tfd
 from tensorflow.keras.mixed_precision import experimental as prec
-
 import common
+from models.unit_encoder import UnitEncoder
 
 
 class RSSM(common.Module):
@@ -150,31 +150,38 @@ class RSSM(common.Module):
 
 class Sc2Encoder(common.Module):
 
-    def __init__(self, act=tf.nn.elu, avl_action_units=(16, 16),
+    def __init__(self, act=tf.nn.elu,
+                 avl_action_widths=(16, 16),
                  screen_depth=32, screen_kernels=(4, 4, 4, 4),
-                 minimap_depth=32, minimap_kernels=(4, 4, 4, 4)):
-        self._avl_action_encoder = MlpEncoder('avl_action', act, avl_action_units)
+                 minimap_depth=32, minimap_kernels=(4, 4, 4, 4),
+                 player_widths=(8, 8)):
+        self._avl_action_encoder = MlpEncoder('avl_action', act, avl_action_widths)
         self._screen_encoder = ConvEncoder('screen', screen_depth, act, screen_kernels)
         self._minimap_encoder = ConvEncoder('minimap', minimap_depth, act, minimap_kernels)
+        self._player_encoder = MlpEncoder('player', act, player_widths)
+        self._unit_encoder = UnitEncoder()
 
     @tf.function
     def __call__(self, obs):
         avl_actions = self._avl_action_encoder(obs['available_actions'])
         screen = self._screen_encoder(obs['screen'])
         minimap = self._minimap_encoder(obs['mini'])
+        player = self._player_encoder(obs['player'])
+        units = self._unit_encoder(obs['units'])
+
         pass
 
 
 class MlpEncoder(common.Module):
-    def __init__(self, name_prefix, act=tf.nn.elu, units=(16, 16)):
+    def __init__(self, name_prefix, act=tf.nn.elu, widths=(16, 16)):
         self._name_prefix = name_prefix
         self._act = getattr(tf.nn, act) if isinstance(act, str) else act
-        self._avl_actions_units = units
+        self._widths = widths
 
     @tf.function
     def __call__(self, inputs):
         x = inputs
-        for i, width in enumerate(self._avl_actions_units):
+        for i, width in enumerate(self._widths):
             x = self._act(self.get(f'{self._name_prefix}_h{i}', tfkl.Dense, width)(x))
         return x
 
