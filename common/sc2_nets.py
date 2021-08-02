@@ -7,11 +7,9 @@ import common
 from models.unit_encoder import UnitEncoder
 
 
-class RSSM(common.Module):
+class Sc2RSSM(common.Module):
 
-    def __init__(
-        self, stoch=30, deter=200, hidden=200, discrete=False, act=tf.nn.elu,
-        std_act='softplus', min_std=0.1):
+    def __init__(self, stoch=30, deter=200, hidden=200, discrete=False, act=tf.nn.elu, std_act='softplus', min_std=0.1):
         super().__init__()
         self._stoch = stoch
         self._deter = deter
@@ -20,7 +18,7 @@ class RSSM(common.Module):
         self._act = getattr(tf.nn, act) if isinstance(act, str) else act
         self._std_act = std_act
         self._min_std = min_std
-        self._cell = GRUCell(self._deter, norm=True)
+        self._cell = Sc2GRUCell(self._deter, norm=True)
         self._cast = lambda x: tf.cast(x, prec.global_policy().compute_dtype)
 
     def initial(self, batch_size):
@@ -39,26 +37,26 @@ class RSSM(common.Module):
         return state
 
     @tf.function
-    def observe(self, embed, action, state=None):
+    def observe(self, embed, action, action_args, state=None):
         swap = lambda x: tf.transpose(x, [1, 0] + list(range(2, len(x.shape))))
         if state is None:
             state = self.initial(tf.shape(action)[0])
-        embed, action = swap(embed), swap(action)
+        embed, action, action_args = swap(embed), swap(action), swap(action_args)
         post, prior = common.static_scan(
             lambda prev, inputs: self.obs_step(prev[0], *inputs),
-            (action, embed), (state, state))
+            (action, action_args, embed), (state, state))
         post = {k: swap(v) for k, v in post.items()}
         prior = {k: swap(v) for k, v in prior.items()}
         return post, prior
 
     @tf.function
-    def imagine(self, action, state=None):
+    def imagine(self, action, action_args, state=None):
         swap = lambda x: tf.transpose(x, [1, 0] + list(range(2, len(x.shape))))
         if state is None:
             state = self.initial(tf.shape(action)[0])
         assert isinstance(state, dict), state
         action = swap(action)
-        prior = common.static_scan(self.img_step, action, state)
+        prior = common.static_scan(self.img_step, action, action_args, state)
         prior = {k: swap(v) for k, v in prior.items()}
         return prior
 
@@ -82,8 +80,8 @@ class RSSM(common.Module):
         return dist
 
     @tf.function
-    def obs_step(self, prev_state, prev_action, embed, sample=True):
-        prior = self.img_step(prev_state, prev_action, sample)
+    def obs_step(self, prev_state, prev_action, prev_args, embed, sample=True):
+        prior = self.img_step(prev_state, prev_action, prev_args, sample)
         x = tf.concat([prior['deter'], embed], -1)
         x = self.get('obs_out', tfkl.Dense, self._hidden, self._act)(x)
         stats = self._suff_stats_layer('obs_dist', x)
@@ -93,13 +91,14 @@ class RSSM(common.Module):
         return post, prior
 
     @tf.function
-    def img_step(self, prev_state, prev_action, sample=True):
+    def img_step(self, prev_state, prev_action, prev_args, sample=True):
         prev_stoch = self._cast(prev_state['stoch'])
         prev_action = self._cast(prev_action)
+        prev_args = self._cast(prev_args)
         if self._discrete:
             shape = prev_stoch.shape[:-2] + [self._stoch * self._discrete]
             prev_stoch = tf.reshape(prev_stoch, shape)
-        x = tf.concat([prev_stoch, prev_action], -1)
+        x = tf.concat([prev_stoch, prev_action, prev_args], -1)
         x = self.get('img_in', tfkl.Dense, self._hidden, self._act)(x)
         deter = prev_state['deter']
         x, deter = self._cell(x, [deter])
@@ -155,10 +154,10 @@ class Sc2Encoder(common.Module):
                  screen_depth=32, screen_kernels=(4, 4, 4, 4),
                  minimap_depth=32, minimap_kernels=(4, 4, 4, 4),
                  player_widths=(8, 8)):
-        self._avl_action_encoder = MlpEncoder('avl_action', act, avl_action_widths)
-        self._screen_encoder = ConvEncoder('screen', screen_depth, act, screen_kernels)
-        self._minimap_encoder = ConvEncoder('minimap', minimap_depth, act, minimap_kernels)
-        self._player_encoder = MlpEncoder('player', act, player_widths)
+        self._avl_action_encoder = Sc2MlpEncoder('avl_action', act, avl_action_widths)
+        self._screen_encoder = Sc2ConvEncoder('screen', screen_depth, act, screen_kernels)
+        self._minimap_encoder = Sc2ConvEncoder('minimap', minimap_depth, act, minimap_kernels)
+        self._player_encoder = Sc2MlpEncoder('player', act, player_widths)
         self._unit_encoder = UnitEncoder()
 
     @tf.function
@@ -169,10 +168,12 @@ class Sc2Encoder(common.Module):
         player = self._player_encoder(obs['player'])
         units = self._unit_encoder(obs['units'])
 
+        state_embed = tf.concat([avl_actions, screen, minimap, player, units], -1)
+
         pass
 
 
-class MlpEncoder(common.Module):
+class Sc2MlpEncoder(common.Module):
     def __init__(self, name_prefix, act=tf.nn.elu, widths=(16, 16)):
         self._name_prefix = name_prefix
         self._act = getattr(tf.nn, act) if isinstance(act, str) else act
@@ -186,7 +187,7 @@ class MlpEncoder(common.Module):
         return x
 
 
-class ConvEncoder(common.Module):
+class Sc2ConvEncoder(common.Module):
     def __init__(self, name_prefix, depth, act, kernels):
         self._name_prefix = name_prefix
         self._act = getattr(tf.nn, act) if isinstance(act, str) else act
@@ -204,7 +205,7 @@ class ConvEncoder(common.Module):
         return tf.reshape(x, shape)
 
 
-class ConvDecoder(common.Module):
+class Sc2ConvDecoder(common.Module):
 
     def __init__(
         self, shape=(64, 64, 3), depth=32, act=tf.nn.elu, kernels=(5, 5, 6, 6)):
@@ -228,7 +229,7 @@ class ConvDecoder(common.Module):
         return tfd.Independent(tfd.Normal(mean, 1), len(self._shape))
 
 
-class MLP(common.Module):
+class Sc2MLP(common.Module):
 
     def __init__(self, shape, layers, units, act=tf.nn.elu, **out):
         self._shape = (shape,) if isinstance(shape, int) else shape
@@ -241,10 +242,10 @@ class MLP(common.Module):
         x = tf.cast(features, prec.global_policy().compute_dtype)
         for index in range(self._layers):
             x = self.get(f'h{index}', tfkl.Dense, self._units, self._act)(x)
-        return self.get('out', DistLayer, self._shape, **self._out)(x)
+        return self.get('out', Sc2DistLayer, self._shape, **self._out)(x)
 
 
-class GRUCell(tf.keras.layers.AbstractRNNCell):
+class Sc2GRUCell(tf.keras.layers.AbstractRNNCell):
 
     def __init__(self, size, norm=False, act=tf.tanh, update_bias=-1, **kwargs):
         super().__init__()
@@ -277,7 +278,7 @@ class GRUCell(tf.keras.layers.AbstractRNNCell):
         return output, [output]
 
 
-class DistLayer(common.Module):
+class Sc2DistLayer(common.Module):
 
     def __init__(self, shape, dist='mse', min_std=0.1, init_std=0.0):
         self._shape = shape

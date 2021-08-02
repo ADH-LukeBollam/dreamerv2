@@ -20,8 +20,8 @@ class Sc2Agent(common.Module):
         with tf.device('cpu:0'):
             self.step = tf.Variable(int(self._counter), tf.int64)
         self._dataset = dataset
-        self.wm = WorldModel(self.step, config)
-        self._task_behavior = ActorCritic(config, self.step, self._num_act)
+        self.wm = Sc2WorldModel(self.step, config)
+        self._task_behavior = Sc2ActorCritic(config, self.step, self._num_act)
         reward = lambda f, s, a: self.wm.heads['reward'](f).mode()
         self._expl_behavior = dict(
             greedy=lambda: self._task_behavior,
@@ -51,13 +51,13 @@ class Sc2Agent(common.Module):
         latent, _ = self.wm.rssm.obs_step(latent, action, embed, sample)
         feat = self.wm.rssm.get_feat(latent)
         if mode == 'eval':
-            actor = self._task_behavior.actor(feat)
+            actor = self._task_behavior.type_actor(feat)
             action = actor.mode()
         elif self._should_expl(self.step):
-            actor = self._expl_behavior.actor(feat)
+            actor = self._expl_behavior.type_actor(feat)
             action = actor.sample()
         else:
-            actor = self._task_behavior.actor(feat)
+            actor = self._task_behavior.type_actor(feat)
             action = actor.sample()
         noise = {'train': self.config.expl_noise, 'eval': self.config.eval_noise}
         action = common.action_noise(action, noise[mode], self._action_space)
@@ -88,12 +88,12 @@ class Sc2Agent(common.Module):
         return {'openl': self.wm.video_pred(data)}
 
 
-class WorldModel(common.Module):
+class Sc2WorldModel(common.Module):
 
     def __init__(self, step, config):
         self.step = step
         self.config = config
-        self.rssm = common.RSSM(**config.rssm)
+        self.rssm = common.Sc2RSSM(**config.rssm)
         self.heads = {}
         shape = config.image_size + (1 if config.grayscale else 3,)
         self.encoder = common.Sc2Encoder(**config.encoder)
@@ -119,7 +119,7 @@ class WorldModel(common.Module):
     def loss(self, data, state=None):
         data = self.preprocess(data)
         embed = self.encoder(data)
-        post, prior = self.rssm.observe(embed, data['action'], state)
+        post, prior = self.rssm.observe(embed, data['action'], data['action_args'], state)
         kl_loss, kl_value = self.rssm.kl_loss(post, prior, **self.config.kl)
         assert len(kl_loss.shape) == 0
         likes = {}
@@ -142,28 +142,32 @@ class WorldModel(common.Module):
         metrics['post_ent'] = self.rssm.get_dist(post).entropy().mean()
         return model_loss, post, outs, metrics
 
-    def imagine(self, policy, start, horizon):
+    def imagine(self, action_policy, arg_policy, start, horizon):
         flatten = lambda x: x.reshape([-1] + list(x.shape[2:]))
         start = {k: flatten(v) for k, v in start.items()}
 
         def step(prev, _):
             state, _, _ = prev
             feat = self.rssm.get_feat(state)
-            action = policy(tf.stop_gradient(feat)).sample()
-            succ = self.rssm.img_step(state, action)
+            action = action_policy(tf.stop_gradient(feat)).sample()
+            feat_action = tf.concat([feat, action], -1)
+            action_args = arg_policy(tf.stop_gradient(feat_action)).sample()
+            succ = self.rssm.img_step(state, action, action_args)
             return succ, feat, action
 
         feat = 0 * self.rssm.get_feat(start)
-        action = policy(feat).mode()
-        succs, feats, actions = common.static_scan(
-            step, tf.range(horizon), (start, feat, action))
+        action = action_policy(feat).mode()
+        feat_action = tf.concat([feat, action], -1)
+        arg = arg_policy(feat_action).mode()
+        succs, feats, actions, args = common.static_scan(
+            step, tf.range(horizon), (start, feat, action, arg))
         states = {k: tf.concat([
             start[k][None], v[:-1]], 0) for k, v in succs.items()}
         if 'discount' in self.heads:
             discount = self.heads['discount'](feats).mean()
         else:
             discount = self.config.discount * tf.ones_like(feats[..., 0])
-        return feats, states, actions, discount
+        return feats, states, actions, args, discount
 
     @tf.function
     def preprocess(self, obs):
@@ -244,72 +248,82 @@ class WorldModel(common.Module):
         return video.transpose((1, 2, 0, 3, 4)).reshape((T, H, B * W, C))
 
 
-class ActorCritic(common.Module):
+class Sc2ActorCritic(common.Module):
 
-    def __init__(self, config, step, num_actions):
+    def __init__(self, config, step, num_actions, num_args):
         self.config = config
         self.step = step
         self.num_actions = num_actions
-        self.actor = common.MLP(num_actions, **config.actor)
-        self.critic = common.MLP([], **config.critic)
+        self.type_actor = common.Sc2MLP(num_actions, **config.type_actor)
+        self.type_critic = common.Sc2MLP([], **config.type_critic)
+        self.arg_actor = common.Sc2MLP(num_args, **config.type_actor)
+        self.arg_critic = common.Sc2MLP([], **config.type_critic)
         if config.slow_target:
-            self._target_critic = common.MLP([], **config.critic)
+            self._target_critic = common.Sc2MLP([], **config.type_critic)
             self._updates = tf.Variable(0, tf.int64)
         else:
-            self._target_critic = self.critic
-        self.actor_opt = common.Optimizer('actor', **config.actor_opt)
-        self.critic_opt = common.Optimizer('critic', **config.critic_opt)
+            self._target_critic = self.type_critic
+        self.type_actor_opt = common.Optimizer('type_actor', **config.type_actor_opt)
+        self.type_critic_opt = common.Optimizer('type_critic', **config.type_critic_opt)
+        self.arg_actor_opt = common.Optimizer('arg_actor', **config.arg_actor_opt)
+        self.arg_critic_opt = common.Optimizer('arg_critic', **config.arg_critic_opt)
 
     def train(self, world_model, start, reward_fn):
         metrics = {}
         hor = self.config.imag_horizon
         with tf.GradientTape() as actor_tape:
-            feat, state, action, disc = world_model.imagine(self.actor, start, hor)
-            reward = reward_fn(feat, state, action)
-            target, weight, mets1 = self.target(feat, action, reward, disc)
-            actor_loss, mets2 = self.actor_loss(feat, action, target, weight)
+            feat, state, action, action_args, disc = world_model.imagine(self.type_actor, self.arg_actor, start, hor)
+            reward = reward_fn(feat, state, action, action_args, action_args)
+            target, weight, mets1 = self.target(feat, action, action_args, reward, disc)
+
+            type_actor_loss, mets2 = self.actor_loss('type', self.type_actor, self.type_critic, feat, action, target, weight)
+            feat_action = tf.concat([feat, action], -1)
+            arg_actor_loss, mets3 = self.actor_loss('arg', self.arg_actor, self.arg_critic, feat, feat_action, target, weight)
         with tf.GradientTape() as critic_tape:
-            critic_loss, mets3 = self.critic_loss(feat, action, target, weight)
-        metrics.update(self.actor_opt(actor_tape, actor_loss, self.actor))
-        metrics.update(self.critic_opt(critic_tape, critic_loss, self.critic))
-        metrics.update(**mets1, **mets2, **mets3)
+            type_critic_loss, mets4 = self.critic_loss('type', self.type_critic, feat, action, action_args, target, weight)
+            arg_critic_loss, mets5 = self.critic_loss('arg', self.arg_critic, feat, action, action_args, target, weight)
+        metrics.update(self.type_actor_opt(actor_tape, type_actor_loss, self.type_actor))
+        metrics.update(self.type_critic_opt(critic_tape, type_critic_loss, self.type_critic))
+        metrics.update(self.arg_actor_opt(actor_tape, arg_actor_loss, self.type_actor))
+        metrics.update(self.arg_critic_opt(critic_tape, arg_critic_loss, self.type_critic))
+        metrics.update(**mets1, **mets2, **mets3, **mets4, **mets5)
         self.update_slow_target()  # Variables exist after first forward pass.
         return metrics
 
-    def actor_loss(self, feat, action, target, weight):
+    def actor_loss(self, name, actor_head, critic_head, feat, action, target, weight):
         metrics = {}
-        policy = self.actor(tf.stop_gradient(feat))
+        policy = actor_head(tf.stop_gradient(feat))
         if self.config.actor_grad == 'dynamics':
             objective = target
         elif self.config.actor_grad == 'reinforce':
-            baseline = self.critic(feat[:-1]).mode()
+            baseline = critic_head(feat[:-1]).mode()
             advantage = tf.stop_gradient(target - baseline)
             objective = policy.log_prob(action)[:-1] * advantage
         elif self.config.actor_grad == 'both':
-            baseline = self.critic(feat[:-1]).mode()
+            baseline = critic_head(feat[:-1]).mode()
             advantage = tf.stop_gradient(target - baseline)
             objective = policy.log_prob(action)[:-1] * advantage
             mix = common.schedule(self.config.actor_grad_mix, self.step)
             objective = mix * target + (1 - mix) * objective
-            metrics['actor_grad_mix'] = mix
+            metrics[f'{name}_actor_grad_mix'] = mix
         else:
             raise NotImplementedError(self.config.actor_grad)
         ent = policy.entropy()
         ent_scale = common.schedule(self.config.actor_ent, self.step)
         objective += ent_scale * ent[:-1]
         actor_loss = -(weight[:-1] * objective).mean()
-        metrics['actor_ent'] = ent.mean()
-        metrics['actor_ent_scale'] = ent_scale
+        metrics[f'{name}_actor_ent'] = ent.mean()
+        metrics[f'{name}_actor_ent_scale'] = ent_scale
         return actor_loss, metrics
 
-    def critic_loss(self, feat, action, target, weight):
-        dist = self.critic(feat)[:-1]
+    def critic_loss(self, name, critic_head, feat, action, action_args, target, weight):
+        dist = critic_head(feat)[:-1]
         target = tf.stop_gradient(target)
         critic_loss = -(dist.log_prob(target) * weight[:-1]).mean()
-        metrics = {'critic': dist.mode().mean()}
+        metrics = {f'{name}_critic': dist.mode().mean()}
         return critic_loss, metrics
 
-    def target(self, feat, action, reward, disc):
+    def target(self, feat, action, action_args, reward, disc):
         reward = tf.cast(reward, tf.float32)
         disc = tf.cast(disc, tf.float32)
         value = self._target_critic(feat).mode()
@@ -330,6 +344,6 @@ class ActorCritic(common.Module):
             if self._updates % self.config.slow_target_update == 0:
                 mix = 1.0 if self._updates == 0 else float(
                     self.config.slow_target_fraction)
-                for s, d in zip(self.critic.variables, self._target_critic.variables):
+                for s, d in zip(self.type_critic.variables, self._target_critic.variables):
                     d.assign(mix * s + (1 - mix) * d)
             self._updates.assign_add(1)
