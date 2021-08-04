@@ -117,7 +117,7 @@ class Sc2WorldModel(common.Module):
     def loss(self, data, state=None):
         data = self.preprocess(data)
         embed = self.encoder(data)
-        post, prior = self.rssm.observe(embed, data['action'], data['action_args'], state)
+        post, prior = self.rssm.observe(embed, data['action_id'], data['action_args'], state)
         kl_loss, kl_value = self.rssm.kl_loss(post, prior, **self.config.kl)
         assert len(kl_loss.shape) == 0
         likes = {}
@@ -149,7 +149,7 @@ class Sc2WorldModel(common.Module):
             feat = self.rssm.get_feat(state)
             action_prob = action_policy(tf.stop_gradient(feat)).sample()
 
-            # filter out unavailable actions based off world models understanding of current state
+            # filter out unavailable actions using learned
             available_action_types = tf.stop_gradient(self.heads['available_actions'](feat).mode())  # dont train the world model while imagining
             masked_actions = action_prob * available_action_types
             chosen_action = tf.one_hot(tf.argmax(masked_actions, axis=-1), depth=tf.shape(action)[-1])
@@ -157,7 +157,7 @@ class Sc2WorldModel(common.Module):
             feat_action = tf.concat([feat, chosen_action], -1)
             action_args = arg_policy(tf.stop_gradient(feat_action)).sample()
             succ = self.rssm.img_step(state, action, action_args)
-            return succ, feat, action, action_args
+            return succ, feat, chosen_action, action_args
 
         feat = 0 * self.rssm.get_feat(start)
         action = action_policy(feat).mode()
@@ -172,10 +172,6 @@ class Sc2WorldModel(common.Module):
         else:
             discount = self.config.discount * tf.ones_like(feats[..., 0])
         return feats, states, actions, args, discount
-
-    def mask_unavailable_actions(self, feat, action):
-
-        return action * available_action_types
 
     @tf.function
     def preprocess(self, obs):

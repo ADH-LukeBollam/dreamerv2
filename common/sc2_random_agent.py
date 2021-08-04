@@ -1,36 +1,25 @@
 from pysc2.lib import actions
 import tensorflow as tf
 import numpy as np
-
-from pysc2.lib.actions import get_args_indices_lookup
+from common import dists
 
 
 class Sc2RandomAgent:
-    def __init__(self, screen_size, minimap_size):
-        self.all_args = get_args_indices_lookup(screen_size, minimap_size)
+    def __init__(self, action_spec):
+        # use one big dist, then split it
+        self._action_dists = {key: dists.OneHotDist(tf.zeros(value.shape)) for (key, value) in action_spec.spaces.items()}
+
+        # use continuous distribution to randomise actions, because its constrained by available actions
+        self._action_dists['action_id'] = dists.TruncNormalDist(tf.zeros(action_spec.spaces['action_id'].shape), 0.5, 0, 1)
 
     def __call__(self, obs, state=None, mode=None):
-        num_steps = len(obs['reset'])
         output = {}
+        for k in self._action_dists:
+            output[k] = self._action_dists[k].sample(len(obs['reset']))
 
-        actions = []
-        args = []
+        # zero out unavailable actions
+        invalid_masked = output['action_id'] * obs['available_actions']
+        indices = tf.argmax(invalid_masked, axis=-1)
+        output['action_id'] = tf.one_hot(indices, depth=tf.shape(invalid_masked)[-1])
 
-        for i in range(num_steps):
-            av_act = np.squeeze(np.argwhere(obs['available_actions'][0]))
-            action_id = np.random.choice(av_act)
-            actions.append(np.array([action_id], dtype=np.int))
-
-            arg_set = np.zeros([item for sublist in list(self.all_args.values())[-1] for item in sublist][-1], dtype=np.int)
-            arg_indices = [np.random.randint(arg_range[0], arg_range[1]) for ranges in self.all_args.values() for arg_range in ranges]
-            # arg_indices = np.concatenate([np.random.randint(arg_range[0], arg_range[1]) for arg_range in arg_set for arg_set in self.all_args.values()], axis=-1)
-            arg_set[arg_indices] = 1
-
-            # args = [[np.random.randint(0, size) for size in arg.sizes]
-            #         for arg in self.action_spec.functions[function_id].args]
-
-            args.append(arg_set)
-
-        output['action_id'] = np.stack(actions)
-        output['action_args'] = np.stack(args)
         return output, None

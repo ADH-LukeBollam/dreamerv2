@@ -8,3 +8,4 @@ from .tfutils import *
 from .dists import *
 from .nets import *
 from .sc2_nets import *
+from .sc2_random_agent import *

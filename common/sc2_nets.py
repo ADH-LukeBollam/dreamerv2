@@ -262,7 +262,7 @@ class Sc2CompositeMLP(common.Module):
 
         out = {}
         for k in self._shapes_dict.keys():
-            out[k] = self.get(f'out_{k}', Sc2DistLayer, self._shape, **self._out)(x)
+            out[k] = self.get(f'out_{k}', Sc2DistLayer, self._shapes_dict[k], **self._out)(x)
 
         return out
 

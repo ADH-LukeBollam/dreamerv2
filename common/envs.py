@@ -6,7 +6,7 @@ import numpy as np
 
 from pysc2.env import sc2_env, available_actions_printer
 from pysc2.lib import actions
-from pysc2.lib.actions import get_action_embed_lookup, get_args_indices_lookup
+from pysc2.lib.actions import get_action_embed_lookup, get_arg_size_lookup
 from pysc2.lib.buffs import get_buff_embed_lookup
 from pysc2.lib.features import ScreenFeatures, Player, FeatureUnit
 from pysc2.lib.units import get_unit_embed_lookup
@@ -141,7 +141,7 @@ class Sc2:
         self.buff_embed_lookup = get_buff_embed_lookup()
         self.action_embed_lookup = get_action_embed_lookup()
         self.action_id_lookup = dict((reversed(item) for item in self.action_embed_lookup.items()))
-        self.args_indices_lookup = get_args_indices_lookup(screen_size, minimap_size)
+        self.args_size_lookup = get_arg_size_lookup(screen_size, minimap_size)
 
         from absl import flags
         flags.FLAGS.mark_as_parsed()
@@ -178,9 +178,9 @@ class Sc2:
         action_args = {'action_id': action_id}
 
         # the arg lookup is a dict of ranges of each arg, create a one-hot for each
-        for arg_key in self.args_indices_lookup:
-            for i, arg in enumerate(self.args_indices_lookup[arg_key]):
-                action_args[f'{arg_key}_{i}'] = gym.spaces.Discrete(arg[1] - arg[0])
+        for arg_key in self.args_size_lookup:
+            for i, size in enumerate(self.args_size_lookup[arg_key]):
+                action_args[f'{arg_key}_{i}'] = gym.spaces.Discrete(size)
 
         return gym.spaces.Dict(action_args)
 
@@ -188,14 +188,14 @@ class Sc2:
         args = []
 
         # rebuild the action into sc2 ids and arguments
-        action_id = self.action_id_lookup[action['action_id'][0]]
+        action_id = self.action_id_lookup[action['action_id']]
 
         required_args = [arg for arg in self.available_actions.functions[action_id].args]
 
         for r in required_args:
             arg_set = []
-            for ind in self.args_indices_lookup[r.id]:
-                arg_set.append(np.argmax(action['action_args'][ind[0]:ind[1]]))
+            for i, size in enumerate(self.args_size_lookup[r.id]):
+                arg_set.append(action[f'{r.id}_{i}'])
             args.append(arg_set)
 
         sc2_action = actions.FunctionCall(action_id, args)
@@ -426,30 +426,37 @@ class NormalizeAction:
 
 class OneHotAction:
 
-    def __init__(self, env, key='action'):
-        assert isinstance(env.action_space[key], gym.spaces.Discrete)
+    def __init__(self, env):
         self._env = env
-        self._key = key
         self._random = np.random.RandomState()
+        self._keys = self._env.action_space.spaces.keys()
 
     def __getattr__(self, name):
         return getattr(self._env, name)
 
     @property
     def action_space(self):
-        shape = (self._env.action_space[self._key].n,)
-        space = gym.spaces.Box(low=0, high=1, shape=shape, dtype=np.float32)
-        space.sample = self._sample_action
-        space.n = shape[0]
-        return gym.spaces.Dict({**self._env.action_space.spaces, self._key: space})
+        og_space = self._env.action_space
+        new_space = {}
+        for k in self._keys:
+            shape = (og_space[k].n,)
+            space = gym.spaces.Box(low=0, high=1, shape=shape, dtype=np.float32)
+            space.sample = self._sample_action
+            space.n = shape[0]
+            new_space[k] = space
+        return gym.spaces.Dict(new_space)
 
     def step(self, action):
-        index = np.argmax(action[self._key]).astype(int)
-        reference = np.zeros_like(action[self._key])
-        reference[index] = 1
-        if not np.allclose(reference, action[self._key]):
-            raise ValueError(f'Invalid one-hot action:\n{action}')
-        return self._env.step({**action, self._key: index})
+        action_indices = {}
+
+        for k in self._keys:
+            index = np.argmax(action[k]).astype(int)
+            reference = np.zeros_like(action[k])
+            reference[index] = 1
+            if not np.allclose(reference, action[k]):
+                raise ValueError(f'Invalid one-hot action:\n{action}')
+            action_indices[k] = index
+        return self._env.step(action_indices)
 
     def reset(self):
         return self._env.reset()
