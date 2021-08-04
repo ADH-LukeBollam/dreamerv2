@@ -7,19 +7,28 @@ from common import dists
 class Sc2RandomAgent:
     def __init__(self, action_spec):
         # use one big dist, then split it
-        self._action_dists = {key: dists.OneHotDist(tf.zeros(value.shape)) for (key, value) in action_spec.spaces.items()}
+        size = sum([value.shape[0] for value in action_spec.spaces.values()])
+        self._action_spec = {key: value.shape[0] for (key, value) in action_spec.spaces.items()}
 
         # use continuous distribution to randomise actions, because its constrained by available actions
-        self._action_dists['action_id'] = dists.TruncNormalDist(tf.zeros(action_spec.spaces['action_id'].shape), 0.5, 0, 1)
+        self._dist = dists.TruncNormalDist(tf.zeros(size), 0.5, 0, 1)
 
     def __call__(self, obs, state=None, mode=None):
         output = {}
-        for k in self._action_dists:
-            output[k] = self._action_dists[k].sample(len(obs['reset']))
 
-        # zero out unavailable actions
-        invalid_masked = output['action_id'] * obs['available_actions']
-        indices = tf.argmax(invalid_masked, axis=-1)
-        output['action_id'] = tf.one_hot(indices, depth=tf.shape(invalid_masked)[-1])
+        rand = self._dist.sample(len(obs['reset']))
+        index = 0
+        for k in self._action_spec:
+            size = self._action_spec[k]
+            if k == 'action_id':
+                # zero out unavailable actions
+                invalid_masked = rand[:, index:index+size] * obs['available_actions']
+                output['action_id'] = tf.one_hot(tf.argmax(invalid_masked, axis=-1), depth=tf.shape(invalid_masked)[-1])
+            else:
+                size = self._action_spec[k]
+                output[k] = tf.one_hot(tf.argmax(rand[:, index:index+size], axis=-1), depth=size)
+            index += size
+
+
 
         return output, None

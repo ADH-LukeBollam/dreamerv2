@@ -180,7 +180,7 @@ class Sc2:
         # the arg lookup is a dict of ranges of each arg, create a one-hot for each
         for arg_key in self.args_size_lookup:
             for i, size in enumerate(self.args_size_lookup[arg_key]):
-                action_args[f'{arg_key}_{i}'] = gym.spaces.Discrete(size)
+                action_args[f'arg_{arg_key}_{i}'] = gym.spaces.Discrete(size)
 
         return gym.spaces.Dict(action_args)
 
@@ -195,7 +195,7 @@ class Sc2:
         for r in required_args:
             arg_set = []
             for i, size in enumerate(self.args_size_lookup[r.id]):
-                arg_set.append(action[f'{r.id}_{i}'])
+                arg_set.append(action[f'arg_{r.id}_{i}'])
             args.append(arg_set)
 
         sc2_action = actions.FunctionCall(action_id, args)
