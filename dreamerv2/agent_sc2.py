@@ -5,15 +5,14 @@ import elements
 import common
 import expl
 from pysc2.lib.features import Visibility, Effects, PlayerRelative
+from pysc2.lib.actions import get_action_embed_lookup
 
 
 class Sc2Agent(common.Module):
-
     def __init__(self, config, logger, actspce, step, dataset):
         self.config = config
         self._logger = logger
         self._action_space = actspce
-        self._num_act = actspce.n if hasattr(actspce, 'n') else actspce.shape[0]
         self._should_expl = elements.Until(int(
             config.expl_until / config.action_repeat))
         self._counter = step
@@ -21,15 +20,13 @@ class Sc2Agent(common.Module):
             self.step = tf.Variable(int(self._counter), tf.int64)
         self._dataset = dataset
         self.wm = Sc2WorldModel(self.step, config)
-        self._task_behavior = Sc2ActorCritic(config, self.step, self._num_act)
+        self._task_behavior = Sc2ActorCritic(config, self.step, self._action_space)
         reward = lambda f, s, a: self.wm.heads['reward'](f).mode()
         self._expl_behavior = dict(
             greedy=lambda: self._task_behavior,
             random=lambda: expl.Random(actspce),
-            plan2explore=lambda: expl.Plan2Explore(
-                config, self.wm, self._num_act, self.step, reward),
-            model_loss=lambda: expl.ModelLoss(
-                config, self.wm, self._num_act, self.step, reward),
+            plan2explore=lambda: expl.Plan2Explore(config, self.wm, self._num_act, self.step, reward),
+            model_loss=lambda: expl.ModelLoss(config, self.wm, self._num_act, self.step, reward),
         )[config.expl_behavior]()
         # Train step to initialize variables including optimizer statistics.
         self.train(next(self._dataset))
@@ -95,9 +92,10 @@ class Sc2WorldModel(common.Module):
         self.config = config
         self.rssm = common.Sc2RSSM(**config.rssm)
         self.heads = {}
+        self.action_lookup = get_action_embed_lookup()
         shape = config.image_size + (1 if config.grayscale else 3,)
         self.encoder = common.Sc2Encoder(**config.encoder)
-        self.heads['available_actions'] = None
+        self.heads['available_actions'] = common.MLP(len(self.action_lookup), **config.avl_action_head)
         self.heads['screen'] = common.ConvDecoder(shape, **config.decoder)
         self.heads['mini'] = common.ConvDecoder(shape, **config.decoder)
         self.heads['player'] = None
@@ -149,11 +147,17 @@ class Sc2WorldModel(common.Module):
         def step(prev, _):
             state, _, _ = prev
             feat = self.rssm.get_feat(state)
-            action = action_policy(tf.stop_gradient(feat)).sample()
-            feat_action = tf.concat([feat, action], -1)
+            action_prob = action_policy(tf.stop_gradient(feat)).sample()
+
+            # filter out unavailable actions based off world models understanding of current state
+            available_action_types = tf.stop_gradient(self.heads['available_actions'](feat).mode())  # dont train the world model while imagining
+            masked_actions = action_prob * available_action_types
+            chosen_action = tf.one_hot(tf.argmax(masked_actions, axis=-1), depth=tf.shape(action)[-1])
+
+            feat_action = tf.concat([feat, chosen_action], -1)
             action_args = arg_policy(tf.stop_gradient(feat_action)).sample()
             succ = self.rssm.img_step(state, action, action_args)
-            return succ, feat, action
+            return succ, feat, action, action_args
 
         feat = 0 * self.rssm.get_feat(start)
         action = action_policy(feat).mode()
@@ -168,6 +172,10 @@ class Sc2WorldModel(common.Module):
         else:
             discount = self.config.discount * tf.ones_like(feats[..., 0])
         return feats, states, actions, args, discount
+
+    def mask_unavailable_actions(self, feat, action):
+
+        return action * available_action_types
 
     @tf.function
     def preprocess(self, obs):
@@ -250,14 +258,14 @@ class Sc2WorldModel(common.Module):
 
 class Sc2ActorCritic(common.Module):
 
-    def __init__(self, config, step, num_actions, num_args):
+    def __init__(self, config, step, act_space):
         self.config = config
         self.step = step
-        self.num_actions = num_actions
-        self.type_actor = common.Sc2MLP(num_actions, **config.type_actor)
+        self.type_actor = common.Sc2MLP(act_space['action_id'].n, **config.type_actor)
         self.type_critic = common.Sc2MLP([], **config.type_critic)
-        self.arg_actor = common.Sc2MLP(num_args, **config.type_actor)
-        self.arg_critic = common.Sc2MLP([], **config.type_critic)
+        arg_space_sizes = {key: value.n for (key, value) in act_space.spaces.items() if key != 'action_id'}
+        self.arg_actor = common.Sc2CompositeMLP(arg_space_sizes, **config.arg_actor)
+        self.arg_critic = common.Sc2CompositeMLP([], **config.arg_critic)
         if config.slow_target:
             self._target_critic = common.Sc2MLP([], **config.type_critic)
             self._updates = tf.Variable(0, tf.int64)
@@ -273,15 +281,17 @@ class Sc2ActorCritic(common.Module):
         hor = self.config.imag_horizon
         with tf.GradientTape() as actor_tape:
             feat, state, action, action_args, disc = world_model.imagine(self.type_actor, self.arg_actor, start, hor)
-            reward = reward_fn(feat, state, action, action_args, action_args)
+            reward = reward_fn(feat, state, action, action_args)
             target, weight, mets1 = self.target(feat, action, action_args, reward, disc)
 
             type_actor_loss, mets2 = self.actor_loss('type', self.type_actor, self.type_critic, feat, action, target, weight)
             feat_action = tf.concat([feat, action], -1)
-            arg_actor_loss, mets3 = self.actor_loss('arg', self.arg_actor, self.arg_critic, feat, feat_action, target, weight)
+            arg_actor_loss, mets3 = self.actor_loss('arg', self.arg_actor, self.arg_critic, feat_action, action_args, target, weight)
+
         with tf.GradientTape() as critic_tape:
             type_critic_loss, mets4 = self.critic_loss('type', self.type_critic, feat, action, action_args, target, weight)
             arg_critic_loss, mets5 = self.critic_loss('arg', self.arg_critic, feat, action, action_args, target, weight)
+
         metrics.update(self.type_actor_opt(actor_tape, type_actor_loss, self.type_actor))
         metrics.update(self.type_critic_opt(critic_tape, type_critic_loss, self.type_critic))
         metrics.update(self.arg_actor_opt(actor_tape, arg_actor_loss, self.type_actor))

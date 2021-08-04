@@ -2,39 +2,35 @@ from pysc2.lib import actions
 import tensorflow as tf
 import numpy as np
 
+from pysc2.lib.actions import get_args_indices_lookup
+
 
 class Sc2RandomAgent:
-    def __init__(self, action_spec):
-        self.action_spec = action_spec
+    def __init__(self, screen_size, minimap_size):
+        self.all_args = get_args_indices_lookup(screen_size, minimap_size)
 
     def __call__(self, obs, state=None, mode=None):
         num_steps = len(obs['reset'])
         output = {}
 
-        function_ids = []
-        arg_shapes = []
-        arg_flattened = []
+        actions = []
+        args = []
 
         for i in range(num_steps):
             av_act = np.squeeze(np.argwhere(obs['available_actions'][0]))
-            function_id = np.random.choice(av_act)
-            function_ids.append(np.array([function_id], dtype=np.int))
+            action_id = np.random.choice(av_act)
+            actions.append(np.array([action_id], dtype=np.int))
 
-            args = [[np.random.randint(0, size) for size in arg.sizes]
-                    for arg in self.action_spec.functions[function_id].args]
+            arg_set = np.zeros([item for sublist in list(self.all_args.values())[-1] for item in sublist][-1], dtype=np.int)
+            arg_indices = [np.random.randint(arg_range[0], arg_range[1]) for ranges in self.all_args.values() for arg_range in ranges]
+            # arg_indices = np.concatenate([np.random.randint(arg_range[0], arg_range[1]) for arg_range in arg_set for arg_set in self.all_args.values()], axis=-1)
+            arg_set[arg_indices] = 1
 
-            # up to 5 required args for any action (action dependant, sometimes less are needed
-            arg_shape = [len(a) for a in args]
-            arg_shape_padded = np.concatenate([arg_shape, np.zeros([5 - len(args)], dtype=np.int)])
-            arg_shapes.append(arg_shape_padded)
+            # args = [[np.random.randint(0, size) for size in arg.sizes]
+            #         for arg in self.action_spec.functions[function_id].args]
 
-            # up to 10 required total args components
-            flat_args = [item for sublist in args for item in sublist]
-            arg_pad = 10 - len(flat_args)
-            args_padded = np.concatenate([flat_args, np.zeros([arg_pad], dtype=np.int)])
-            arg_flattened.append(args_padded)
+            args.append(arg_set)
 
-        output['action_id'] = np.stack(function_ids)
-        output['action_args'] = np.stack(arg_flattened)
-        output['action_arg_shapes'] = np.stack(arg_shapes)
+        output['action_id'] = np.stack(actions)
+        output['action_args'] = np.stack(args)
         return output, None

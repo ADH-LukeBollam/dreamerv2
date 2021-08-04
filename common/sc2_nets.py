@@ -245,6 +245,28 @@ class Sc2MLP(common.Module):
         return self.get('out', Sc2DistLayer, self._shape, **self._out)(x)
 
 
+
+class Sc2CompositeMLP(common.Module):
+
+    def __init__(self, shapes_dict, layers, units, act=tf.nn.elu, **out):
+        self._shapes_dict = shapes_dict   # lookup of shapes, eg. ['size_0': [16], 'size_1': [16], 'colour': [2] ...]
+        self._layers = layers
+        self._units = units
+        self._act = getattr(tf.nn, act) if isinstance(act, str) else act
+        self._out = out
+
+    def __call__(self, features):
+        x = tf.cast(features, prec.global_policy().compute_dtype)
+        for index in range(self._layers):
+            x = self.get(f'h{index}', tfkl.Dense, self._units, self._act)(x)
+
+        out = {}
+        for k in self._shapes_dict.keys():
+            out[k] = self.get(f'out_{k}', Sc2DistLayer, self._shape, **self._out)(x)
+
+        return out
+
+
 class Sc2GRUCell(tf.keras.layers.AbstractRNNCell):
 
     def __init__(self, size, norm=False, act=tf.tanh, update_bias=-1, **kwargs):

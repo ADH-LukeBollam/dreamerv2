@@ -1858,20 +1858,26 @@ def get_args_indices_lookup(screen_size, minimap_size):
     for a in all_args:
         # use one-hot encodings for screen and minimap positions
         if 'screen' in a.name:
-            arg_size = screen_size * 2
+            arg_size = screen_size
             arg_start = index
             arg_end = index + arg_size
-            lookup[a.id] = (arg_start, arg_end)
+            index += arg_size
+            arg_start2 = index
+            arg_end2 = index + arg_size
+            lookup[a.id] = [(arg_start, arg_end), (arg_start2, arg_end2)]
         elif 'minimap' in a.name:
-            arg_size = minimap_size * 2
+            arg_size = minimap_size
             arg_start = index
             arg_end = index + arg_size
-            lookup[a.id] = (arg_start, arg_end)
+            index += arg_size
+            arg_start2 = index
+            arg_end2 = index + arg_size
+            lookup[a.id] = [(arg_start, arg_end), (arg_start2, arg_end2)]
         else:
             arg_size = sum(a.sizes)
             arg_start = index
             arg_end = index + arg_size
-            lookup[a.id] = (arg_start, arg_end)
+            lookup[a.id] = [(arg_start, arg_end)]
         index += arg_size
 
     return lookup

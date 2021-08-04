@@ -140,6 +140,7 @@ class Sc2:
         self.unit_embed_lookup = get_unit_embed_lookup()
         self.buff_embed_lookup = get_buff_embed_lookup()
         self.action_embed_lookup = get_action_embed_lookup()
+        self.action_id_lookup = dict((reversed(item) for item in self.action_embed_lookup.items()))
         self.args_indices_lookup = get_args_indices_lookup(screen_size, minimap_size)
 
         from absl import flags
@@ -173,25 +174,31 @@ class Sc2:
 
     @property
     def action_space(self):
-        action_id = gym.spaces.Box(-1, 1, (1,), dtype=np.int)
-        action_args = gym.spaces.Box(-1, 1, (10,), dtype=np.int)
-        action_arg_shapes = gym.spaces.Box(-1, 1, (5,), dtype=np.int)
-        return gym.spaces.Dict({'action_id': action_id, 'action_args': action_args, 'action_arg_shapes': action_arg_shapes})
+        action_id = gym.spaces.Discrete(len(self.action_embed_lookup))
+        action_args = {'action_id': action_id}
+
+        # the arg lookup is a dict of ranges of each arg, create a one-hot for each
+        for arg_key in self.args_indices_lookup:
+            for i, arg in enumerate(self.args_indices_lookup[arg_key]):
+                action_args[f'{arg_key}_{i}'] = gym.spaces.Discrete(arg[1] - arg[0])
+
+        return gym.spaces.Dict(action_args)
 
     def step(self, action):
         args = []
-        # rebuild action args
-        current_arg = 0
-        for c in action['action_arg_shapes']:
-            if c == 0:
-                break
-            a = []
-            for i in range(c):
-                a.append(action['action_args'][current_arg])
-                current_arg += 1
-            args.append(a)
 
-        sc2_action = actions.FunctionCall(action['action_id'][0], args)
+        # rebuild the action into sc2 ids and arguments
+        action_id = self.action_id_lookup[action['action_id'][0]]
+
+        required_args = [arg for arg in self.available_actions.functions[action_id].args]
+
+        for r in required_args:
+            arg_set = []
+            for ind in self.args_indices_lookup[r.id]:
+                arg_set.append(np.argmax(action['action_args'][ind[0]:ind[1]]))
+            args.append(arg_set)
+
+        sc2_action = actions.FunctionCall(action_id, args)
 
         timestep = self._env.step([sc2_action])[0]
         obs = self.collect_sc_observation(timestep)
@@ -216,8 +223,9 @@ class Sc2:
         # store available actions, pad up to 30
         actions_pad_size = 30
         av_actions = timestep.observation.available_actions
+        action_indices = [self.action_embed_lookup[a] for a in av_actions]
         action_categorical = np.zeros(len(self.action_embed_lookup), dtype=np.int)
-        action_categorical[av_actions] = 1
+        action_categorical[action_indices] = 1
         obs['available_actions'] = action_categorical
 
         # screen features
