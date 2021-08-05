@@ -4,8 +4,8 @@ from tensorflow.keras import mixed_precision as prec
 import elements
 import common
 import expl
+from models.set_prior import SetPrior
 from pysc2.lib.features import Visibility, Effects, PlayerRelative
-from pysc2.lib.actions import get_action_embed_lookup
 
 
 class Sc2Agent(common.Module):
@@ -19,7 +19,7 @@ class Sc2Agent(common.Module):
         with tf.device('cpu:0'):
             self.step = tf.Variable(int(self._counter), tf.int64)
         self._dataset = dataset
-        self.wm = Sc2WorldModel(self.step, config)
+        self.wm = Sc2WorldModel(self.step, config, actspce)
         self._task_behavior = Sc2ActorCritic(config, self.step, self._action_space)
         reward = lambda f, s, a: self.wm.heads['reward'](f).mode()
         self._expl_behavior = dict(
@@ -87,18 +87,19 @@ class Sc2Agent(common.Module):
 
 class Sc2WorldModel(common.Module):
 
-    def __init__(self, step, config):
+    def __init__(self, step, config, actspace):
         self.step = step
         self.config = config
         self.rssm = common.Sc2RSSM(**config.rssm)
         self.heads = {}
-        self.action_lookup = get_action_embed_lookup()
-        shape = config.image_size + (1 if config.grayscale else 3,)
+        self.act_space = actspace
+        self.action_input_order = self.get_action_input_order()
         self.encoder = common.Sc2Encoder(**config.encoder)
-        self.heads['available_actions'] = common.MLP(len(self.action_lookup), **config.avl_action_head)
-        self.heads['screen'] = common.ConvDecoder(shape, **config.decoder)
-        self.heads['mini'] = common.ConvDecoder(shape, **config.decoder)
-        self.heads['player'] = None
+        self.heads['available_actions'] = common.MLP(actspace['action_id'].n, **config.avl_action_head)
+        self.heads['screen'] = common.ConvDecoder((config.screen_size, config.screen_size, 20), **config.decoder)
+        self.heads['mini'] = common.ConvDecoder((config.mini_size, config.mini_size, 13), **config.decoder)
+        self.heads['player'] = common.MLP(15, **config.player_head)
+        self.heads['unit_init_set'] = SetPrior(200)     # units are padded to 200
         self.heads['units'] = None
         self.heads['reward'] = common.MLP([], **config.reward_head)
         if config.pred_discount:
@@ -106,6 +107,13 @@ class Sc2WorldModel(common.Module):
         for name in config.grad_heads:
             assert name in self.heads, name
         self.model_opt = common.Optimizer('model', **config.model_opt)
+
+    def get_action_input_order(self):
+        action_order = ['action_id']
+        args = {k: v for (k, v) in self.act_space.items() if 'arg' in k}
+        args = {k: v for k, v in sorted(args.items(), key=lambda x: float(x[0].split('_')[1]) + float(x[0].split('_')[2])*0.1)}   # sort by arg type, then arg axis
+        action_order += [a for a in args.keys()]
+        return action_order
 
     def train(self, data, state=None):
         with tf.GradientTape() as model_tape:
@@ -117,7 +125,8 @@ class Sc2WorldModel(common.Module):
     def loss(self, data, state=None):
         data = self.preprocess(data)
         embed = self.encoder(data)
-        post, prior = self.rssm.observe(embed, data['action_id'], data['action_args'], state)
+        action_input = self.action_preprocess(data)
+        post, prior = self.rssm.observe(embed, action_input, state)
         kl_loss, kl_value = self.rssm.kl_loss(post, prior, **self.config.kl)
         assert len(kl_loss.shape) == 0
         likes = {}
@@ -235,6 +244,13 @@ class Sc2WorldModel(common.Module):
         return obs
 
     @tf.function
+    def action_preprocess(self, data):
+        action_input = []
+        for act in self.action_input_order:
+            action_input.append(data[act])
+        return tf.concat(action_input, axis=-1)
+
+    @tf.function
     def video_pred(self, data):
         data = self.preprocess(data)
         truth = data['image'][:6] + 0.5
@@ -259,9 +275,9 @@ class Sc2ActorCritic(common.Module):
         self.step = step
         self.type_actor = common.Sc2MLP(act_space['action_id'].n, **config.type_actor)
         self.type_critic = common.Sc2MLP([], **config.type_critic)
-        arg_space_sizes = {key: value.n for (key, value) in act_space.spaces.items() if key != 'action_id'}
+        arg_space_sizes = {key: value.n for (key, value) in act_space.items() if key != 'action_id'}
         self.arg_actor = common.Sc2CompositeMLP(arg_space_sizes, **config.arg_actor)
-        self.arg_critic = common.Sc2CompositeMLP([], **config.arg_critic)
+        self.arg_critic = common.Sc2MLP([], **config.arg_critic)
         if config.slow_target:
             self._target_critic = common.Sc2MLP([], **config.type_critic)
             self._updates = tf.Variable(0, tf.int64)

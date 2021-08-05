@@ -110,7 +110,7 @@ class Atari:
 
     @property
     def action_space(self):
-        return gym.spaces.Dict({'action': self._env.action_space})
+        return {'action': self._env.action_space}
 
     def close(self):
         return self._env.close()
@@ -182,7 +182,7 @@ class Sc2:
             for i, size in enumerate(self.args_size_lookup[arg_key]):
                 action_args[f'arg_{arg_key}_{i}'] = gym.spaces.Discrete(size)
 
-        return gym.spaces.Dict(action_args)
+        return action_args
 
     def step(self, action):
         args = []
@@ -416,7 +416,7 @@ class NormalizeAction:
         low = np.where(self._mask, -np.ones_like(self._low), self._low)
         high = np.where(self._mask, np.ones_like(self._low), self._high)
         space = gym.spaces.Box(low, high, dtype=np.float32)
-        return gym.spaces.Dict({**self._env.action_space.spaces, self._key: space})
+        return {**self._env.action_space.spaces, self._key: space}
 
     def step(self, action):
         orig = (action[self._key] + 1) / 2 * (self._high - self._low) + self._low
@@ -429,7 +429,7 @@ class OneHotAction:
     def __init__(self, env):
         self._env = env
         self._random = np.random.RandomState()
-        self._keys = self._env.action_space.spaces.keys()
+        self._keys = self._env.action_space.keys()
 
     def __getattr__(self, name):
         return getattr(self._env, name)
@@ -444,7 +444,7 @@ class OneHotAction:
             space.sample = self._sample_action
             space.n = shape[0]
             new_space[k] = space
-        return gym.spaces.Dict(new_space)
+        return new_space
 
     def step(self, action):
         action_indices = {}

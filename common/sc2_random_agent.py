@@ -6,11 +6,9 @@ from common import dists
 
 class Sc2RandomAgent:
     def __init__(self, action_spec):
-        # use one big dist, then split it
-        size = sum([value.shape[0] for value in action_spec.spaces.values()])
-        self._action_spec = {key: value.shape[0] for (key, value) in action_spec.spaces.items()}
-
-        # use continuous distribution to randomise actions, because its constrained by available actions
+        # It's slow to call a dist many times, so use one big one, then split it
+        size = sum([value.shape[0] for value in action_spec.values()])
+        self._action_spec = {key: value.shape[0] for (key, value) in action_spec.items()}
         self._dist = dists.TruncNormalDist(tf.zeros(size), 0.5, 0, 1)
 
     def __call__(self, obs, state=None, mode=None):

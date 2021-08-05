@@ -16,20 +16,16 @@ class SetPrior(tf.keras.Model):
 
         self.parametrization = tfpl.VariableLayer([self.event_size, mvnd_input_size],
                                                   name='loc', dtype=tf.float32)
-        self.learnable_mvndiag = tfpl.DistributionLambda(
-            make_distribution_fn=lambda t: tfd.MultivariateNormalDiag(
-                loc=t[..., 0],
-                scale_diag=tf.exp(t[..., 1])
-            )
-        )
 
-    def call(self, batch_size):
+    def call(self, features):
         # doesnt matter what we pass in here as tf.VariableLayer ignores input (an error gets thrown if empty though)
+        batch_size = tf.reduce_sum(tf.shape(features)[:-1])
         params = self.parametrization(None)
         tiled = tf.tile(tf.expand_dims(params, 0), [batch_size, 1, 1])
-        samples = self.learnable_mvndiag(tiled)
-        return samples
 
+        mean = tf.reshape(tiled, tf.concat([tf.shape(features)[:-1], self.event_size], 0))
+        return tfd.Independent(tfd.Normal(mean, 1), len(self._shape))
+        return samples
 
 if __name__ == '__main__':
     batch_size = 1000

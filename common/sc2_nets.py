@@ -37,14 +37,14 @@ class Sc2RSSM(common.Module):
         return state
 
     @tf.function
-    def observe(self, embed, action, action_args, state=None):
+    def observe(self, embed, action_input, state=None):
         swap = lambda x: tf.transpose(x, [1, 0] + list(range(2, len(x.shape))))
         if state is None:
-            state = self.initial(tf.shape(action)[0])
-        embed, action, action_args = swap(embed), swap(action), swap(action_args)
+            state = self.initial(tf.shape(action_input)[0])
+        embed, action_input = swap(embed), swap(action_input)
         post, prior = common.static_scan(
             lambda prev, inputs: self.obs_step(prev[0], *inputs),
-            (action, action_args, embed), (state, state))
+            (action_input, embed), (state, state))
         post = {k: swap(v) for k, v in post.items()}
         prior = {k: swap(v) for k, v in prior.items()}
         return post, prior
@@ -153,12 +153,15 @@ class Sc2Encoder(common.Module):
                  avl_action_widths=(16, 16),
                  screen_depth=32, screen_kernels=(4, 4, 4, 4),
                  minimap_depth=32, minimap_kernels=(4, 4, 4, 4),
-                 player_widths=(8, 8)):
+                 player_widths=(8, 8),
+                 unit_embed_dim=16, unit_pp_dim=64, unit_num_layers=2, unit_trans_dim=256, unit_trans_heads=4,
+                 mixing_widths=(512,)):
         self._avl_action_encoder = Sc2MlpEncoder('avl_action', act, avl_action_widths)
         self._screen_encoder = Sc2ConvEncoder('screen', screen_depth, act, screen_kernels)
         self._minimap_encoder = Sc2ConvEncoder('minimap', minimap_depth, act, minimap_kernels)
         self._player_encoder = Sc2MlpEncoder('player', act, player_widths)
-        self._unit_encoder = UnitEncoder()
+        self._unit_encoder = UnitEncoder(unit_embed_dim, unit_pp_dim, unit_num_layers, unit_trans_dim, unit_trans_heads)
+        self._mixing_encoder = Sc2MlpEncoder('mixing', act, mixing_widths)
 
     @tf.function
     def __call__(self, obs):
@@ -169,8 +172,9 @@ class Sc2Encoder(common.Module):
         units = self._unit_encoder(obs['units'])
 
         state_embed = tf.concat([avl_actions, screen, minimap, player, units], -1)
+        mixed = self._mixing_encoder(state_embed)
 
-        pass
+        return mixed
 
 
 class Sc2MlpEncoder(common.Module):

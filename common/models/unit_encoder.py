@@ -9,7 +9,7 @@ from tensorflow.keras.mixed_precision import experimental as prec
 
 
 class UnitProcessing(tf.keras.layers.Layer):
-    def __init__(self, preprocesing_dim, out_dim, unit_embedding_dim):
+    def __init__(self, unit_embedding_dim, preprocesing_dim, out_dim):
         super(UnitProcessing, self).__init__()
         self.preprocesing_dim = preprocesing_dim
         self.out_dim = out_dim
@@ -35,10 +35,10 @@ class UnitProcessing(tf.keras.layers.Layer):
 
 
 class UnitEncoder(common.Module):
-    def __init__(self, preprocesing_dim=64, num_layers=2, trans_dim=256, num_heads=4, unit_embedding_dim=16):
+    def __init__(self, unit_embedding_dim=16, preprocesing_dim=64, num_layers=2, trans_dim=256, num_heads=4):
         super(UnitEncoder, self).__init__()
 
-        self.pointwise_processing = UnitProcessing(preprocesing_dim, trans_dim, unit_embedding_dim)
+        self.pointwise_processing = UnitProcessing(unit_embedding_dim, preprocesing_dim, trans_dim)
 
         self.num_layers = num_layers
         self.transformer = [TransformerLayer(trans_dim, num_heads) for _ in range(num_layers)]

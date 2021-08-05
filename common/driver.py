@@ -9,7 +9,7 @@ class Driver:
     self._on_steps = []
     self._on_resets = []
     self._on_episodes = []
-    self._actspaces = [env.action_space.spaces for env in envs]
+    self._actspaces = [env.action_space for env in envs]
     self.reset()
 
   def on_step(self, callback):
