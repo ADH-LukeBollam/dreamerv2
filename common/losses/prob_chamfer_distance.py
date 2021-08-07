@@ -16,27 +16,37 @@ def prob_chamfer_distance(set_dist, set_real):
     x = tf.reshape(set_real, (-1,) + tuple(set_real.shape[-2:]))
     x_dist = tfd.BatchReshape(distribution=set_dist, batch_shape=[batch_total, element_total], validate_args=True)
 
-    # create a batch to pass into the distribution
+    # tile the elements so we can compare the log_prob of every element to every other element
+    repeated_elems = tf.transpose(tf.repeat(tf.expand_dims(x, axis=-2), element_total, axis=-2), perm=(1, 0, 2, 3))
+    pointwise_log_prob = x_dist.log_prob(repeated_elems)
+    log_probs = tf.transpose(pointwise_log_prob, (1, 2, 0))
 
-    batch_axis = tf.shape(batch_shape)
-    remaining_shape = tf.range(batch_axis+1, batch_axis+3)
-    in_perm = tf.concat([batch_axis, batch_shape, remaining_shape], axis=0)
-    batched_in_trans = tf.transpose(tf.repeat(tf.expand_dims(set_real, axis=-2), num_units, axis=-2), perm=in_perm)
-
-    point_batch_log_prob = set_dist.log_prob(batched_in_trans)
-
-    out_perm = tf.concat([tf.range(1, tf.rank(point_batch_log_prob)), [0]], axis=0)
-    log_probs = tf.transpose(point_batch_log_prob, out_perm)
-
-    minimum_square_distance_a_to_b = tf.reduce_min(input_tensor=log_probs, axis=-1)
-    minimum_square_distance_b_to_a = tf.reduce_min(input_tensor=log_probs, axis=-2)
+    minimum_square_distance_a_to_b = tf.reduce_max(input_tensor=log_probs, axis=-1)
+    minimum_square_distance_b_to_a = tf.reduce_max(input_tensor=log_probs, axis=-2)
 
     setwise_distance = (tf.reduce_mean(input_tensor=minimum_square_distance_a_to_b, axis=-1) +
                         tf.reduce_mean(input_tensor=minimum_square_distance_b_to_a, axis=-1))
-    return setwise_distance
+
+    out_shape = tf.shape(set_real)[:-2]
+    batch_shaped = tf.reshape(setwise_distance, shape=out_shape)
+    return batch_shaped
 
 
 if __name__ == '__main__':
+    # simple set to ensure math is checking out
+    simple_mean = tf.constant([[[-0.5], [1.5]], [[1.0], [0.0]]])
+    simple_dist = tfd.Independent(tfd.Normal(simple_mean, 1), 1)
+
+    closest_prob = simple_dist.log_prob(simple_mean)
+    expected = (tf.reduce_mean(input_tensor=closest_prob, axis=-1) + tf.reduce_mean(input_tensor=closest_prob, axis=-1))
+
+    # same set but with elements swapped, to make sure the minimum permutation is being found
+    inverted_true = tf.constant([[[1.5], [-0.5]], [[0.0], [1.0]]])
+    actual = prob_chamfer_distance(simple_dist, inverted_true)
+
+    eq = tf.assert_equal(expected, actual)
+
+    # test some functionality with a big set with a batch like the unit encoder
     num_units = 200
     true_set = tf.random.normal([10, 10, num_units, 65])
 
