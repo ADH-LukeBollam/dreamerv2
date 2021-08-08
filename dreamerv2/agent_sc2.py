@@ -6,6 +6,7 @@ import common
 import expl
 from models.set_prior import SetPrior
 from pysc2.lib.features import Visibility, Effects, PlayerRelative
+from losses.prob_chamfer_distance import prob_chamfer_distance
 
 
 class Sc2Agent(common.Module):
@@ -135,9 +136,16 @@ class Sc2WorldModel(common.Module):
         for name, head in self.heads.items():
             grad_head = (name in self.config.grad_heads)
             inp = feat if grad_head else tf.stop_gradient(feat)
-            like = tf.cast(head(inp).log_prob(data[name]), tf.float32)
-            likes[name] = like
-            losses[name] = -like.mean()
+            if name == 'units':
+                unpadded_units = tf.where(tf.not_equal(data[name][:, :, :, 0]), 0)   # find indices where unit type not 0
+                unpadded_count = tf.reduce_sum(unpadded_units, axis=-1)
+                like = prob_chamfer_distance(head(inp), data[name], unpadded_count)
+                likes[name] = like
+                losses[name] = -like.mean()
+            else:
+                like = tf.cast(head(inp).log_prob(data[name]), tf.float32)
+                likes[name] = like
+                losses[name] = -like.mean()
         model_loss = sum(
             self.config.loss_scales.get(k, 1.0) * v for k, v in losses.items())
         outs = dict(
