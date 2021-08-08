@@ -80,8 +80,8 @@ class Sc2RSSM(common.Module):
         return dist
 
     @tf.function
-    def obs_step(self, prev_state, prev_action, prev_args, embed, sample=True):
-        prior = self.img_step(prev_state, prev_action, prev_args, sample)
+    def obs_step(self, prev_state, prev_action, embed, sample=True):
+        prior = self.img_step(prev_state, prev_action, sample)
         x = tf.concat([prior['deter'], embed], -1)
         x = self.get('obs_out', tfkl.Dense, self._hidden, self._act)(x)
         stats = self._suff_stats_layer('obs_dist', x)
@@ -91,14 +91,13 @@ class Sc2RSSM(common.Module):
         return post, prior
 
     @tf.function
-    def img_step(self, prev_state, prev_action, prev_args, sample=True):
+    def img_step(self, prev_state, prev_action, sample=True):
         prev_stoch = self._cast(prev_state['stoch'])
         prev_action = self._cast(prev_action)
-        prev_args = self._cast(prev_args)
         if self._discrete:
             shape = prev_stoch.shape[:-2] + [self._stoch * self._discrete]
             prev_stoch = tf.reshape(prev_stoch, shape)
-        x = tf.concat([prev_stoch, prev_action, prev_args], -1)
+        x = tf.concat([prev_stoch, prev_action], -1)
         x = self.get('img_in', tfkl.Dense, self._hidden, self._act)(x)
         deter = prev_state['deter']
         x, deter = self._cell(x, [deter])
@@ -175,6 +174,10 @@ class Sc2Encoder(common.Module):
         mixed = self._mixing_encoder(state_embed)
 
         return mixed
+
+    @tf.function
+    def embed_unit_type(self, unit_feats):
+        return self._unit_encoder.embed_unit_type(unit_feats)
 
 
 class Sc2MlpEncoder(common.Module):

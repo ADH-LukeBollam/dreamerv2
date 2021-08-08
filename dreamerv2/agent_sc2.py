@@ -5,6 +5,7 @@ import elements
 import common
 import expl
 from models.set_prior import SetPrior
+from models.unit_encoder import UnitDecoder
 from pysc2.lib.features import Visibility, Effects, PlayerRelative
 from losses.prob_chamfer_distance import prob_chamfer_distance
 
@@ -99,9 +100,9 @@ class Sc2WorldModel(common.Module):
         self.heads['available_actions'] = common.MLP(actspace['action_id'].n, **config.avl_action_head)
         self.heads['screen'] = common.ConvDecoder((config.screen_size, config.screen_size, 20), **config.decoder)
         self.heads['mini'] = common.ConvDecoder((config.mini_size, config.mini_size, 13), **config.decoder)
-        self.heads['player'] = common.MLP(15, **config.player_head)
-        self.heads['unit_init_set'] = SetPrior(200)     # units are padded to 200
-        self.heads['units'] = None
+        self.heads['player'] = common.MLP(6, **config.player_head)
+        self.heads['unit_init_set'] = SetPrior(86)     # after embedding unit type to 16 features, units have 86 features each
+        self.heads['units'] = UnitDecoder(**config.unit_decoder)
         self.heads['reward'] = common.MLP([], **config.reward_head)
         if config.pred_discount:
             self.heads['discount'] = common.MLP([], **config.discount_head)
@@ -136,10 +137,28 @@ class Sc2WorldModel(common.Module):
         for name, head in self.heads.items():
             grad_head = (name in self.config.grad_heads)
             inp = feat if grad_head else tf.stop_gradient(feat)
-            if name == 'units':
-                unpadded_units = tf.where(tf.not_equal(data[name][:, :, :, 0]), 0)   # find indices where unit type not 0
-                unpadded_count = tf.reduce_sum(unpadded_units, axis=-1)
-                like = prob_chamfer_distance(head(inp), data[name], unpadded_count)
+            if name == 'unit_init_set':
+                # to train initial unit set for the unit decoder, sample points for every unit in the batch and minimise
+                unpadded_units = tf.where(tf.not_equal(data['units'][:, :, :, 0], 0))  # find indices where unit type not 0
+                total_units = tf.shape(unpadded_units)[0]
+
+                # use our existing learned unit type embedding to convert the one-hot type and use that as label for training the prior
+                unit_feats = tf.stop_gradient(self.encoder.embed_unit_type(data['units']))  # dont train our embedding layer, we just want to sample from it
+                unit_true = tf.gather_nd(unit_feats, unpadded_units)
+
+                dist = head(total_units)
+                like = tf.cast(dist.log_prob(unit_true), tf.float32)
+                likes[name] = like
+                losses[name] = -like.mean()
+            elif name == 'units':
+                unpadded_units = tf.cast(tf.not_equal(data[name][:, :, :, 0], 0), dtype=tf.int32)   # find indices where unit type not 0
+                set_sizes = tf.reduce_sum(unpadded_units, axis=-1)
+
+                initial_set = tf.stop_gradient(self.heads['unit_init_set'].sample(data[name]))     # dont train the initial unit distribution when sampling a set
+
+                unit_probs = head(initial_set, inp, set_sizes)
+
+                like = prob_chamfer_distance(unit_probs, data[name], set_sizes)
                 likes[name] = like
                 losses[name] = -like.mean()
             else:

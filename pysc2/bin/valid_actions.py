@@ -26,7 +26,7 @@ from pysc2.lib import features
 from pysc2.lib import point_flag
 
 FLAGS = flags.FLAGS
-point_flag.DEFINE_point("screen_size", "84", "Resolution for screen actions.")
+point_flag.DEFINE_point("screen_size", "25", "Resolution for screen actions.")
 point_flag.DEFINE_point("minimap_size", "64", "Resolution for minimap actions.")
 flags.DEFINE_bool("hide_specific", False, "Hide the specific actions")
 

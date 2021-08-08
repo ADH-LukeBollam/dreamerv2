@@ -1,6 +1,7 @@
 import tensorflow as tf
 import tensorflow_probability as tfp
 import matplotlib.pyplot as plt
+from tensorflow.keras.mixed_precision import experimental as prec
 
 tfpl = tfp.layers
 tfd = tfp.distributions
@@ -14,18 +15,33 @@ class SetPrior(tf.keras.Model):
         self.event_size = event_size
         mvnd_input_size = 2         # size 2 because loc and scale inputs
 
-        self.parametrization = tfpl.VariableLayer([self.event_size, mvnd_input_size],
-                                                  name='loc', dtype=tf.float32)
+        self.parametrization = tfpl.VariableLayer([self.event_size, mvnd_input_size], name='loc', dtype=tf.float32)
 
-    def call(self, features):
+        self.learnable_mvndiag = tfpl.DistributionLambda(
+            make_distribution_fn=lambda t: tfd.MultivariateNormalDiag(
+                loc=t[..., 0],
+                scale_diag=tf.exp(t[..., 1])
+            )
+        )
+
+    def call(self, batch_size):
         # doesnt matter what we pass in here as tf.VariableLayer ignores input (an error gets thrown if empty though)
-        batch_size = tf.reduce_sum(tf.shape(features)[:-1])
         params = self.parametrization(None)
         tiled = tf.tile(tf.expand_dims(params, 0), [batch_size, 1, 1])
-
-        mean = tf.reshape(tiled, tf.concat([tf.shape(features)[:-1], self.event_size], 0))
-        return tfd.Independent(tfd.Normal(mean, 1), len(self._shape))
+        samples = self.learnable_mvndiag(tiled)
         return samples
+
+    def sample(self, features):
+        # doesnt matter what we pass in here as tf.VariableLayer ignores input (an error gets thrown if empty though)
+        batch_size = tf.reduce_prod(tf.shape(features)[:-1])
+        params = self.parametrization(None)
+        tiled = tf.tile(tf.expand_dims(params, 0), [batch_size, 1, 1])
+        samples = self.learnable_mvndiag(tiled)
+
+        out_shape = tf.concat([tf.shape(features)[:-1], [self.event_size]], 0)
+        shaped = tf.reshape(samples, shape=out_shape)
+
+        return shaped
 
 if __name__ == '__main__':
     batch_size = 1000
