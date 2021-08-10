@@ -12,20 +12,22 @@ def prob_chamfer_distance(set_dist, set_real, sizes):
     batch_total = tf.reduce_prod(batch_shape)
     element_total = tf.shape(set_real)[-2]
 
-    # flatten our batch dimensions so we just have [batch, elements, features]
-    sizes_flat = tf.reshape(sizes, (-1))
-    x = tf.reshape(set_real, (-1,) + tuple(set_real.shape[-2:]))
-    x_dist = tfd.BatchReshape(distribution=set_dist, batch_shape=[batch_total, element_total], validate_args=True)
 
-    # tile the elements so we can compare the log_prob of every element to every other element
-    repeated_elems = tf.transpose(tf.repeat(tf.expand_dims(x, axis=-2), element_total, axis=-2), perm=(1, 0, 2, 3))
-    pointwise_log_prob = x_dist.log_prob(repeated_elems)
-    log_probs = tf.transpose(pointwise_log_prob, (1, 2, 0))
+    # compare each element with every other element
+    probs = []
+    for i in range(element_total):
+        unit = set_real[:, :, i:i + 1, :]
+        probs.append(set_dist.log_prob(unit))
+    log_probs = tf.stack(probs, axis=3)
+
+    # flatten our batch dimensions so we just have [batch, elements, features]
+    log_probs = tf.reshape(log_probs, (-1, element_total, element_total))
 
     # remove the padded values before finding the min distance, otherwise the model can abuse the padding to
     # achieve lower chamfer loss and not actually learn anything
     # slice off the known extras from our tensor, otherwise raggedTensor throws an error if the final ragged
     # tensor can be squeezed smaller than the initial size (ie. at least one row / column needs to be current size)
+    sizes_flat = tf.reshape(sizes, (-1))
     largest_unpadded_dim = tf.reduce_max(sizes_flat)
     log_probs_trimmed = log_probs[:, :largest_unpadded_dim, :largest_unpadded_dim]
 
@@ -55,13 +57,13 @@ if __name__ == '__main__':
 
     # same set but with elements swapped, to make sure the minimum permutation is being found
     inverted_true = tf.constant([[[1.5], [-0.5], [0]], [[0.0], [1.0], [0]]], tf.float32)
-    actual = prob_chamfer_distance(simple_dist, inverted_true, [2, 2])
+    # actual = prob_chamfer_distance(simple_dist, inverted_true, [2, 2])
 
     # test some functionality with a big set with a batch like the unit encoder
     num_units = 200
-    true_set = tf.random.normal([10, 10, num_units, 65])
+    true_set = tf.random.normal([10, 10, num_units, 333])
 
-    mean = tf.random.normal([10, 10, num_units, 65])
+    mean = tf.random.normal([10, 10, num_units, 333])
     dist = tfd.Independent(tfd.Normal(mean, 1), 1)
 
     sizes = tf.random.uniform([10, 10], 50, 150, dtype=tf.int32)
@@ -74,7 +76,7 @@ if __name__ == '__main__':
     for i in range(num_units):
         dist_probs = []
         unit = true_set[:, :, i:i+1, :]
-        unit = tf.repeat(unit, num_units, axis=2)
+        # unit = tf.repeat(unit, num_units, axis=2)
         probs.append(dist.log_prob(unit))
 
     sizes_flat = tf.reshape(sizes, (-1))

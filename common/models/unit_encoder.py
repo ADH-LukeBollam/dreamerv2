@@ -6,6 +6,7 @@ from models.size_predictor import SizePredictor
 from models.set_transformer import TransformerLayer, PoolingMultiheadAttention
 from pysc2.lib.units import get_unit_embed_lookup
 from tensorflow.keras.mixed_precision import experimental as prec
+from tensorflow_probability import distributions as tfd
 
 
 class UnitProcessing(tf.keras.layers.Layer):
@@ -72,7 +73,7 @@ class UnitEncoder(common.Module):
         return embedded
 
 class UnitDecoder(tf.keras.layers.Layer):
-    def __init__(self, num_layers, trans_dim, trans_heads):
+    def __init__(self, num_layers, trans_dim, trans_heads, unit_features):
         super(UnitDecoder, self).__init__()
         # process initial set to transformer dimension
         self.embedding = tf.keras.layers.Conv1D(trans_dim, 1, kernel_initializer='glorot_uniform', use_bias=True,
@@ -81,6 +82,9 @@ class UnitDecoder(tf.keras.layers.Layer):
         self.num_layers = num_layers
         self.trans_dim = trans_dim
         self.transformer = [TransformerLayer(trans_dim, trans_heads) for _ in range(num_layers)]
+
+        num_unit_types = len(set(get_unit_embed_lookup().values()))
+        self.out_dense = tf.keras.layers.Dense(num_unit_types + unit_features)
 
     def call(self, initial_set, encoding, sizes):
         # flatten our batch + timestep dimensions together
@@ -100,8 +104,9 @@ class UnitDecoder(tf.keras.layers.Layer):
         for i in range(self.num_layers):
             x = self.transformer[i](x, x, mask)
 
-        # recover our batch and timestep dims
-        shape = tf.concat([tf.shape(initial_set)[:-1], [x.shape[-1]]], 0)
-        pred_set = tf.reshape(x, shape)
+        out = self.out_dense(x)
+
+        mean = tf.reshape(out, tf.concat([tf.shape(initial_set)[:-1], [tf.shape(out)[-1]]], 0))
+        pred_set = tfd.Independent(tfd.Normal(mean, 1), 1)
 
         return pred_set

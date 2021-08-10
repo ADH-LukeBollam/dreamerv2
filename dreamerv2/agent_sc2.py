@@ -7,6 +7,7 @@ import expl
 from models.set_prior import SetPrior
 from models.unit_encoder import UnitDecoder
 from pysc2.lib.features import Visibility, Effects, PlayerRelative
+from pysc2.lib.units import get_unit_embed_lookup
 from losses.prob_chamfer_distance import prob_chamfer_distance
 
 
@@ -95,6 +96,7 @@ class Sc2WorldModel(common.Module):
         self.rssm = common.Sc2RSSM(**config.rssm)
         self.heads = {}
         self.act_space = actspace
+        self.num_unit_types = len(get_unit_embed_lookup())
         self.action_input_order = self.get_action_input_order()
         self.encoder = common.Sc2Encoder(**config.encoder)
         self.heads['available_actions'] = common.MLP(actspace['action_id'].n, **config.avl_action_head)
@@ -102,7 +104,7 @@ class Sc2WorldModel(common.Module):
         self.heads['mini'] = common.ConvDecoder((config.mini_size, config.mini_size, 13), **config.decoder)
         self.heads['player'] = common.MLP(6, **config.player_head)
         self.heads['unit_init_set'] = SetPrior(86)     # after embedding unit type to 16 features, units have 86 features each
-        self.heads['units'] = UnitDecoder(**config.unit_decoder)
+        self.heads['units'] = UnitDecoder(**config.unit_decoder)    #
         self.heads['reward'] = common.MLP([], **config.reward_head)
         if config.pred_discount:
             self.heads['discount'] = common.MLP([], **config.discount_head)
@@ -151,6 +153,11 @@ class Sc2WorldModel(common.Module):
                 likes[name] = like
                 losses[name] = -like.mean()
             elif name == 'units':
+                # convert the unit type to a one-hot label
+                unit_types = tf.cast(data[name][:, :, :, 0], dtype=tf.int32)
+                unit_types_oh = tf.one_hot(unit_types, self.num_unit_types, dtype=prec.global_policy().compute_dtype)
+                unit_label = tf.concat([unit_types_oh, data[name][:, :, :, 1:]], axis=-1)
+
                 unpadded_units = tf.cast(tf.not_equal(data[name][:, :, :, 0], 0), dtype=tf.int32)   # find indices where unit type not 0
                 set_sizes = tf.reduce_sum(unpadded_units, axis=-1)
 
@@ -158,7 +165,7 @@ class Sc2WorldModel(common.Module):
 
                 unit_probs = head(initial_set, inp, set_sizes)
 
-                like = prob_chamfer_distance(unit_probs, data[name], set_sizes)
+                like = prob_chamfer_distance(unit_probs, unit_label, set_sizes)
                 likes[name] = like
                 losses[name] = -like.mean()
             else:
