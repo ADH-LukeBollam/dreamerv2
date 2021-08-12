@@ -12,13 +12,12 @@ def prob_chamfer_distance(set_dist, set_real, sizes):
     batch_total = tf.reduce_prod(batch_shape)
     element_total = tf.shape(set_real)[-2]
 
-
     # compare each element with every other element
     probs = []
     for i in range(element_total):
-        unit = set_real[:, :, i:i + 1, :]
+        unit = set_real[:, i:i + 1, :]
         probs.append(set_dist.log_prob(unit))
-    log_probs = tf.stack(probs, axis=3)
+    log_probs = tf.stack(probs, axis=-2)
 
     # flatten our batch dimensions so we just have [batch, elements, features]
     log_probs = tf.reshape(log_probs, (-1, element_total, element_total))
@@ -32,10 +31,10 @@ def prob_chamfer_distance(set_dist, set_real, sizes):
     log_probs_trimmed = log_probs[:, :largest_unpadded_dim, :largest_unpadded_dim]
 
     row_sizes = tf.repeat(sizes_flat, sizes_flat)
-    log_probs_ragged = tf.RaggedTensor.from_tensor(log_probs_trimmed, lengths=(sizes_flat, row_sizes))
+    log_probs = tf.RaggedTensor.from_tensor(log_probs_trimmed, lengths=(sizes_flat, row_sizes))
 
-    minimum_square_distance_a_to_b = tf.reduce_max(input_tensor=log_probs_ragged, axis=-1)
-    minimum_square_distance_b_to_a = tf.reduce_max(input_tensor=log_probs_ragged, axis=-2)
+    minimum_square_distance_a_to_b = tf.reduce_max(input_tensor=log_probs, axis=-1)
+    minimum_square_distance_b_to_a = tf.reduce_max(input_tensor=log_probs, axis=-2)
 
     setwise_distance = (tf.reduce_mean(input_tensor=minimum_square_distance_a_to_b, axis=-1) +
                         tf.reduce_mean(input_tensor=minimum_square_distance_b_to_a, axis=-1))
@@ -47,56 +46,31 @@ def prob_chamfer_distance(set_dist, set_real, sizes):
 
 if __name__ == '__main__':
     # simple set to ensure math is checking out
-    simple_mean = tf.constant([[[-0.5], [1.5], [0]], [[1.0], [0.0], [0]]], tf.float32)
-    simple_dist = tfd.Independent(tfd.Normal(simple_mean, 1), 1)
+    mean = tf.constant([[[0.5, 0.75], [0.1, 0.25], [0.35, 0.9]], [[0.4, 0.45], [0.5, 0.7], [0.8, 0.25]]], tf.float32)
+    dist = tfd.Independent(tfd.Normal(mean, 1), 1)
 
     # slice off padding
-    closest_prob = simple_dist.log_prob(simple_mean)
-    closest_prob_unpadded = simple_mean[:, :2]
+    closest_prob = dist.log_prob(mean)
     expected = (tf.reduce_mean(input_tensor=closest_prob, axis=-1) + tf.reduce_mean(input_tensor=closest_prob, axis=-1))
 
     # same set but with elements swapped, to make sure the minimum permutation is being found
-    inverted_true = tf.constant([[[1.5], [-0.5], [0]], [[0.0], [1.0], [0]]], tf.float32)
-    # actual = prob_chamfer_distance(simple_dist, inverted_true, [2, 2])
+    inverted_mean = tf.constant([[[0.35, 0.9], [0.5, 0.75], [0.1, 0.25]], [[0.8, 0.25], [0.4, 0.45], [0.5, 0.7]]], tf.float32)
 
-    # test some functionality with a big set with a batch like the unit encoder
-    num_units = 200
-    true_set = tf.random.normal([10, 10, num_units, 333])
+    actual = prob_chamfer_distance(dist, inverted_mean, [3, 3])
 
-    mean = tf.random.normal([10, 10, num_units, 333])
-    dist = tfd.Independent(tfd.Normal(mean, 1), 1)
+    eq = tf.assert_equal(actual, expected)
 
-    sizes = tf.random.uniform([10, 10], 50, 150, dtype=tf.int32)
+    # check a set that should have imbalanced distance between a=>b, b=>a
+    imb_mean = tf.constant([[[0.5, 0.75], [0.1, 0.25]]], tf.float32)
+    imb_dist = tfd.Independent(tfd.Normal(imb_mean, 1), 1)
 
-    actual = prob_chamfer_distance(dist, true_set, sizes)
+    true = tf.constant([[[0.5, 0.75], [0.5, 0.75]]], tf.float32)
+    closest_prob = imb_dist.log_prob(true)
 
-    # compare against manually comparing every point against every other point to double check transposes are doing as expected
+    # this set has 3 matching points, with one outlier
+    expected = closest_prob[0][0] + tf.reduce_mean([closest_prob[0][0], closest_prob[0][1]])
 
-    probs = []
-    for i in range(num_units):
-        dist_probs = []
-        unit = true_set[:, :, i:i+1, :]
-        # unit = tf.repeat(unit, num_units, axis=2)
-        probs.append(dist.log_prob(unit))
-
-    sizes_flat = tf.reshape(sizes, (-1))
-
-    all_probs = tf.stack(probs, axis=3)
-    all_probs = tf.reshape(all_probs, (-1,) + tuple(all_probs.shape[-2:]))
-    largest_unpadded_dim = tf.reduce_max(sizes_flat)
-    log_probs_trimmed = all_probs[:, :largest_unpadded_dim, :largest_unpadded_dim]
-
-    row_sizes = tf.repeat(sizes_flat, sizes_flat)
-    log_probs_ragged = tf.RaggedTensor.from_tensor(log_probs_trimmed, lengths=(sizes_flat, row_sizes))
-
-    minimum_square_distance_a_to_b = tf.reduce_max(input_tensor=log_probs_ragged, axis=-1)
-    minimum_square_distance_b_to_a = tf.reduce_max(input_tensor=log_probs_ragged, axis=-2)
-
-    setwise_distance = (tf.reduce_mean(input_tensor=minimum_square_distance_a_to_b, axis=-1) +
-                        tf.reduce_mean(input_tensor=minimum_square_distance_b_to_a, axis=-1))
-
-    out_shape = tf.shape(true_set)[:-2]
-    expected = tf.reshape(setwise_distance, shape=out_shape)
+    actual = prob_chamfer_distance(imb_dist, true, [2])
 
     eq = tf.assert_equal(actual, expected)
 
