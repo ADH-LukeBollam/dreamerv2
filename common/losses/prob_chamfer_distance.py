@@ -14,8 +14,9 @@ def prob_chamfer_distance(set_dist, set_real, sizes):
 
     # compare each element with every other element
     probs = []
-    for i in range(element_total):
-        unit = set_real[:, i:i + 1, :]
+    splits = tf.ones(element_total, dtype=tf.int32)
+    units = tf.split(set_real, splits, axis=-2)
+    for unit in units:
         probs.append(set_dist.log_prob(unit))
     log_probs = tf.stack(probs, axis=-2)
 
@@ -67,11 +68,16 @@ if __name__ == '__main__':
     true = tf.constant([[[0.5, 0.75], [0.5, 0.75]]], tf.float32)
     closest_prob = imb_dist.log_prob(true)
 
-    # this set has 3 matching points, with one outlier
+    # this set has two matching points on one side, with one match and one outlier on the other
     expected = closest_prob[0][0] + tf.reduce_mean([closest_prob[0][0], closest_prob[0][1]])
 
     actual = prob_chamfer_distance(imb_dist, true, [2])
 
     eq = tf.assert_equal(actual, expected)
 
+    # test a big ol set like what gets used in the sc environment
+    mean = tf.random.normal([10, 10, 200, 380])
+    sizes = tf.random.uniform([10, 10], 50, 150, dtype=tf.int32)
+    dist = tfd.Independent(tfd.Normal(mean, 1), 1)
+    out = prob_chamfer_distance(dist, mean, sizes)
     pass

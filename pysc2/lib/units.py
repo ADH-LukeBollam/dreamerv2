@@ -114,6 +114,7 @@ class Protoss(enum.IntEnum):
     AdeptPhaseShift = 801
     Archon = 141
     Assimilator = 61
+    AssimilatorRich = 1994
     Carrier = 79
     Colossus = 4
     CyberneticsCore = 72
@@ -200,6 +201,7 @@ class Terran(enum.IntEnum):
     Reactor = 6
     Reaper = 49
     Refinery = 20
+    RefineryRich = 1943
     SCV = 45
     SensorTower = 25
     SiegeTank = 33
@@ -244,6 +246,7 @@ class Zerg(enum.IntEnum):
     Egg = 103
     EvolutionChamber = 90
     Extractor = 88
+    ExtractorRich = 1995
     GreaterSpire = 102
     Hatchery = 86
     Hive = 101
@@ -310,15 +313,51 @@ def get_unit_type(unit_id):
 # heap of memory creating embeddings for units that dont exist
 def get_unit_embed_lookup():
     lookup = {}
-    embed_index = 0
+
+    # group neutral types together to simplify
+    none = 0
+    mineral_field = 1
+    rich_mineral_field = 2
+    vespene_field = 3
+    rich_vespene_field = 4
+    destructible = 5
+    collapsible = 6
+    unbuildable = 7
+    xelnagatower = 8
+
+    embed_index = 9
 
     # add a 'no unit' so that we have something to use in our embedding layer when its a padded value
     lookup[0] = 0
-    embed_index += 1
 
-    for race in (Neutral, Protoss, Terran, Zerg):
+    for unit_id in list(map(int, Neutral)):
+        attr = Neutral(unit_id).name
+        if 'Mineral' in attr:
+            if 'Rich' in attr:
+                lookup[unit_id] = rich_mineral_field
+            else:
+                lookup[unit_id] = mineral_field
+        elif 'Geyser' in attr:
+            if 'Rich' in attr:
+                lookup[unit_id] = rich_vespene_field
+            else:
+                lookup[unit_id] = vespene_field
+        elif 'Unbuildable' in attr:
+            lookup[unit_id] = unbuildable
+        elif 'Destructible' in attr or 'Debris' in attr:
+            lookup[unit_id] = destructible
+        elif 'Collapsible' in attr:
+            lookup[unit_id] = collapsible
+        elif 'XelNagaTower' in attr:
+            lookup[unit_id] = xelnagatower
+        else:
+            lookup[unit_id] = 0
+
+    for race in (Protoss, Terran, Zerg):
         for unit_id in list(map(int, race)):
             lookup[unit_id] = embed_index
             embed_index += 1
 
     return lookup
+
+
