@@ -9455,7 +9455,7 @@
                     ],
                     "cooldown": 1.5,
                     "damage_per_hit": 10.0,
-                    "damage_splash": 0,
+                    "damage_splash": 1.0,
                     "range": 7.0,
                     "target_type": "Ground"
                 }
@@ -11086,7 +11086,7 @@
                     ],
                     "cooldown": 3.0,
                     "damage_per_hit": 40.0,
-                    "damage_splash": 0,
+                    "damage_splash": 1.0,
                     "range": 13.0,
                     "target_type": "Ground"
                 }
@@ -12402,7 +12402,7 @@
                     ],
                     "cooldown": 3.0,
                     "damage_per_hit": 6.0,
-                    "damage_splash": 0,
+                    "damage_splash": 1.0,
                     "range": 10.0,
                     "target_type": "Air"
                 },
@@ -12485,7 +12485,7 @@
                     ],
                     "cooldown": 2.5,
                     "damage_per_hit": 8.0,
-                    "damage_splash": 0,
+                    "damage_splash": 1.0,
                     "range": 5.0,
                     "target_type": "Ground"
                 }
@@ -16002,7 +16002,7 @@
                     "bonuses": [],
                     "cooldown": 1.524658203125,
                     "damage_per_hit": 9.0,
-                    "damage_splash": 0,
+                    "damage_splash": 1.0,
                     "range": 3.0,
                     "target_type": "Any"
                 }
@@ -16072,7 +16072,7 @@
                     "bonuses": [],
                     "cooldown": 0.860107421875,
                     "damage_per_hit": 35.0,
-                    "damage_splash": 0,
+                    "damage_splash": 1.0,
                     "range": 1.0,
                     "target_type": "Ground"
                 }
@@ -17008,7 +17008,7 @@
                     "bonuses": [],
                     "cooldown": 2.0,
                     "damage_per_hit": 40.0,
-                    "damage_splash": 0,
+                    "damage_splash": 1.0,
                     "range": 6.0,
                     "target_type": "Ground"
                 }
@@ -17543,7 +17543,7 @@
                     ],
                     "cooldown": 1.75390625,
                     "damage_per_hit": 25.0,
-                    "damage_splash": 0,
+                    "damage_splash": 1.0,
                     "range": 3.0,
                     "target_type": "Any"
                 }
@@ -18105,7 +18105,7 @@
                     "bonuses": [],
                     "cooldown": 2.0,
                     "damage_per_hit": 18.0,
-                    "damage_splash": 0,
+                    "damage_splash": 1.0,
                     "range": 2.0,
                     "target_type": "Ground"
                 }
@@ -18959,7 +18959,7 @@
                     ],
                     "cooldown": 2.0,
                     "damage_per_hit": 20.0,
-                    "damage_splash": 0,
+                    "damage_splash": 1.0,
                     "range": 8.0,
                     "target_type": "Ground"
                 }
@@ -19287,7 +19287,7 @@
                     "bonuses": [],
                     "cooldown": 1.800048828125,
                     "damage_per_hit": 5.0,
-                    "damage_splash": 0,
+                    "damage_splash": 1.0,
                     "range": 5.0,
                     "target_type": "Air"
                 }
