@@ -73,7 +73,7 @@ class Sc2Agent(common.Module):
         start = outputs['post']
         if self.config.pred_discount:  # Last step could be terminal.
             start = tf.nest.map_structure(lambda x: x[:, :-1], start)
-        reward = lambda f, s, a: self.wm.heads['reward'](f).mode()
+        reward = lambda f: self.wm.heads['reward'](f).mode()
         metrics.update(self._task_behavior.train(self.wm, start, reward))
         if self.config.expl_behavior != 'greedy':
             if self.config.pred_discount:
@@ -165,7 +165,7 @@ class Sc2WorldModel(common.Module):
 
                 unit_probs = head(initial_set, inp, set_sizes)
 
-                like = prob_chamfer_distance(unit_probs, unit_label, set_sizes)
+                like = tf.cast(prob_chamfer_distance(unit_probs, unit_label, set_sizes), tf.float32)
                 likes[name] = like
                 losses[name] = -like.mean()
             else:
@@ -188,28 +188,46 @@ class Sc2WorldModel(common.Module):
         start = {k: flatten(v) for k, v in start.items()}
 
         def step(prev, _):
-            state, _, _ = prev
+            state, _, _, _ = prev
             feat = self.rssm.get_feat(state)
             action_prob = action_policy(tf.stop_gradient(feat)).sample()
 
-            # filter out unavailable actions using learned
-            available_action_types = tf.stop_gradient(self.heads['available_actions'](feat).mode())  # dont train the world model while imagining
+            # only allow imagined available actions
+            available_action_types = tf.cast(tf.stop_gradient(self.heads['available_actions'](feat).mode()), tf.float32)  # dont train the world model while imagining
             masked_actions = action_prob * available_action_types
             chosen_action = tf.one_hot(tf.argmax(masked_actions, axis=-1), depth=tf.shape(action)[-1])
 
             feat_action = tf.concat([feat, chosen_action], -1)
-            action_args = arg_policy(tf.stop_gradient(feat_action)).sample()
-            succ = self.rssm.img_step(state, action, action_args)
-            return succ, feat, chosen_action, action_args
+            arg_dict = {}
+            action_set = {}
+            arg_policy_out = arg_policy(feat_action)
+            for a in arg_policy_out:
+                arg_sample = arg_policy_out[a].sample()
+                arg_dict[a] = arg_sample
+                action_set[a] = arg_sample
+            action_set['action_id'] = chosen_action
+
+            action_vec = self.action_preprocess(action_set)
+
+            succ = self.rssm.img_step(state, action_vec)
+            return succ, feat, chosen_action, arg_dict
 
         feat = 0 * self.rssm.get_feat(start)
+
         action = action_policy(feat).mode()
-        feat_action = tf.concat([feat, action], -1)
-        arg = arg_policy(feat_action).mode()
-        succs, feats, actions, args = common.static_scan(
-            step, tf.range(horizon), (start, feat, action, arg))
-        states = {k: tf.concat([
-            start[k][None], v[:-1]], 0) for k, v in succs.items()}
+        available_action_types = tf.cast(tf.stop_gradient(self.heads['available_actions'](feat).mode()), tf.float32)     # dont train avl action head while learning policy
+        masked_actions = action * available_action_types
+        chosen_action = tf.one_hot(tf.argmax(masked_actions, axis=-1), depth=tf.shape(action)[-1])
+
+        feat_action = tf.concat([feat, chosen_action], -1)
+        arg_dict = {}
+        arg_policy_out = arg_policy(feat_action)
+        for a in arg_policy_out:
+            arg_dict[a] = arg_policy_out[a].mode()
+
+        succs, feats, actions, args = common.static_scan(step, tf.range(horizon), (start, feat, action, arg_dict))
+
+        states = {k: tf.concat([start[k][None], v[:-1]], 0) for k, v in succs.items()}
         if 'discount' in self.heads:
             discount = self.heads['discount'](feats).mean()
         else:
@@ -309,7 +327,7 @@ class Sc2ActorCritic(common.Module):
         self.step = step
         self.type_actor = common.Sc2MLP(act_space['action_id'].n, **config.type_actor)
         self.type_critic = common.Sc2MLP([], **config.type_critic)
-        arg_space_sizes = {key: value.n for (key, value) in act_space.items() if key != 'action_id'}
+        arg_space_sizes = {key: (value.n,) for (key, value) in act_space.items() if key != 'action_id'}
         self.arg_actor = common.Sc2CompositeMLP(arg_space_sizes, **config.arg_actor)
         self.arg_critic = common.Sc2MLP([], **config.arg_critic)
         if config.slow_target:
@@ -327,7 +345,7 @@ class Sc2ActorCritic(common.Module):
         hor = self.config.imag_horizon
         with tf.GradientTape() as actor_tape:
             feat, state, action, action_args, disc = world_model.imagine(self.type_actor, self.arg_actor, start, hor)
-            reward = reward_fn(feat, state, action, action_args)
+            reward = reward_fn(feat)
             target, weight, mets1 = self.target(feat, action, action_args, reward, disc)
 
             type_actor_loss, mets2 = self.actor_loss('type', self.type_actor, self.type_critic, feat, action, target, weight)

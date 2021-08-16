@@ -5,6 +5,8 @@
       "accepts_addon": false,
       "armor": 0.0,
       "attributes": [
+        "Invulnerable",
+        "Uncontrollable"
       ],
       "gas": 0,
       "id": 0,
@@ -68,7 +70,7 @@
         "Rich"
       ],
       "gas": 0,
-      "id": 1,
+      "id": 2,
       "is_addon": false,
       "is_flying": false,
       "is_structure": false,
@@ -98,7 +100,7 @@
         "Gas"
       ],
       "gas": 0,
-      "id": 1,
+      "id": 3,
       "is_addon": false,
       "is_flying": false,
       "is_structure": false,
@@ -129,7 +131,7 @@
         "Rich"
       ],
       "gas": 0,
-      "id": 1,
+      "id": 4,
       "is_addon": false,
       "is_flying": false,
       "is_structure": false,
@@ -158,7 +160,7 @@
         "Pathable"
       ],
       "gas": 0,
-      "id": 0,
+      "id": 7,
       "is_addon": false,
       "is_flying": false,
       "is_structure": true,
@@ -186,7 +188,7 @@
       "attributes": [
       ],
       "gas": 0,
-      "id": 0,
+      "id": 5,
       "is_addon": false,
       "is_flying": false,
       "is_structure": true,
@@ -215,7 +217,7 @@
         "Collapsible"
       ],
       "gas": 0,
-      "id": 0,
+      "id": 6,
       "is_addon": false,
       "is_flying": false,
       "is_structure": true,
@@ -241,11 +243,11 @@
       "accepts_addon": false,
       "armor": 0.0,
       "attributes": [
-                "Invulnerable",
-                "Uncontrollable"
+        "Invulnerable",
+        "Uncontrollable"
       ],
       "gas": 0,
-      "id": 0,
+      "id": 8,
       "is_addon": false,
       "is_flying": false,
       "is_structure": true,
@@ -258,7 +260,7 @@
       "needs_geyser": false,
       "needs_power": false,
       "race": "Neutral",
-      "radius": 0.5,
+      "radius": 1.5,
       "sight": 0.0,
       "size": 0,
       "speed_creep_mul": 1.0,

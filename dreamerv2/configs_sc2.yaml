@@ -15,7 +15,7 @@ defaults:
   grayscale: False
   replay_size: 2e6
   dataset: {batch: 50, length: 50, oversample_ends: True}
-  precision: 16
+  precision: 32
   jit: True
   screen_size: 84
   mini_size: 64
@@ -117,5 +117,5 @@ debug:
   prefill: 100
   pretrain: 1
   train_steps: 1
-  dataset.batch: 10
+  dataset.batch: 1
   dataset.length: 10

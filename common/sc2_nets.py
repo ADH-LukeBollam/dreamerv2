@@ -42,21 +42,19 @@ class Sc2RSSM(common.Module):
         if state is None:
             state = self.initial(tf.shape(action_input)[0])
         embed, action_input = swap(embed), swap(action_input)
-        post, prior = common.static_scan(
-            lambda prev, inputs: self.obs_step(prev[0], *inputs),
-            (action_input, embed), (state, state))
+        post, prior = common.static_scan(lambda prev, inputs: self.obs_step(prev[0], *inputs), (action_input, embed), (state, state))
         post = {k: swap(v) for k, v in post.items()}
         prior = {k: swap(v) for k, v in prior.items()}
         return post, prior
 
     @tf.function
-    def imagine(self, action, action_args, state=None):
+    def imagine(self, action_input, state=None):
         swap = lambda x: tf.transpose(x, [1, 0] + list(range(2, len(x.shape))))
         if state is None:
-            state = self.initial(tf.shape(action)[0])
+            state = self.initial(tf.shape(action_input)[0])
         assert isinstance(state, dict), state
-        action = swap(action)
-        prior = common.static_scan(self.img_step, action, action_args, state)
+        action = swap(action_input)
+        prior = common.static_scan(self.img_step, action, state)
         prior = {k: swap(v) for k, v in prior.items()}
         return prior
 

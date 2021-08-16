@@ -83,7 +83,7 @@ class UnitDecoder(tf.keras.layers.Layer):
         self.trans_dim = trans_dim
         self.transformer = [TransformerLayer(trans_dim, trans_heads) for _ in range(num_layers)]
 
-        num_unit_types = len(set(get_unit_embed_lookup().values()))
+        num_unit_types = len(set(get_unit_embed_lookup().keys()))
         self.out_dense = tf.keras.layers.Dense(num_unit_types + unit_features)
 
     def call(self, initial_set, encoding, sizes):
