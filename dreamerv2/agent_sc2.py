@@ -109,11 +109,6 @@ class Sc2WorldModel(common.Module):
                     acts.append(act)
             self.actions_using_arg[arg] = tf.constant(acts, dtype=tf.int32)
 
-        # create padded args to use when they aren't needed
-        self.padded_args = {}
-        for c in arg_space_sizes:
-            self.padded_args[c] = tf.constant(0, dtype=tf.float32, shape=(arg_space_sizes[c][0],))
-
         self.num_unit_types = len(get_unit_embed_lookup())
         self.action_input_order = self.get_action_input_order()
         self.encoder = common.Sc2Encoder(**config.encoder)
@@ -222,18 +217,22 @@ class Sc2WorldModel(common.Module):
             arg_policy_out = arg_policy(feat_action)
             for arg_key in arg_policy_out:
 
-                arg_vals = arg_policy_out[arg_key].sample()
-
-                # tile our chosen actions and compare against the required list
+                # tile our chosen actions and check if this arg is required for each action
                 actions_needing_arg = self.actions_using_arg[arg_key]
                 actions_tiled = tf.tile(tf.expand_dims(chosen_action_id, -1), [1, tf.size(actions_needing_arg)])
-                needed = tf.greater(tf.math.count_nonzero(tf.equal(actions_tiled, actions_needing_arg), axis=-1, keepdims=True), 0)
+                needed = tf.cast(tf.greater(tf.math.count_nonzero(tf.equal(actions_tiled, actions_needing_arg), axis=-1), 0), tf.float32)
 
-                # use the arg val if true, or padding value if false
-                arg_vals_padded = tf.map_fn(lambda inputs: tf.cond(inputs[0], lambda: inputs[1], lambda: self.padded_args[arg_key]), (needed, arg_vals), dtype=tf.float32)
+                # get our arg vals and add a padding row
+                arg_vals = arg_policy_out[arg_key].sample()
+                arg_vals_padded = tf.concat([tf.zeros((1, tf.shape(arg_vals)[1]), tf.float32), arg_vals], axis=0)
 
-                arg_dict[arg_key] = arg_vals_padded
-                action_set[arg_key] = arg_vals_padded
+                # only gather used arguments, get the padding row for everything else
+                all_indices = tf.range(0, tf.shape(arg_vals)[0], dtype=tf.float32) + 1    # bump all indexes by 1, and use 0 for a padding row
+                gather_indices = tf.cast(all_indices * needed, tf.int32)
+                padded_args = tf.gather(arg_vals_padded, gather_indices, axis=0)
+
+                arg_dict[arg_key] = padded_args
+                action_set[arg_key] = padded_args
             action_set['action_id'] = chosen_action
 
             action_vec = self.action_preprocess(action_set)
