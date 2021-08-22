@@ -54,9 +54,9 @@ defaults:
   model_opt: {opt: adam, lr: 3e-4, eps: 1e-5, clip: 100, wd: 1e-6}
 
   # Actor Critic
-  type_actor: {layers: 4, units: 400, act: elu, dist: trunc_normal, min_std: 0.1}
+  type_actor: {layers: 4, units: 400, act: elu, dist: normal, min_std: 0.1}
   type_critic: {layers: 4, units: 400, act: elu, dist: mse}
-  arg_actor: {layers: 4, units: 400, act: elu, dist: trunc_normal, min_std: 0.1}
+  arg_actor: {layers: 4, units: 400, act: elu, dist: onehot, min_std: 0.1}
   arg_critic: {layers: 4, units: 400, act: elu, dist: mse}
   type_actor_opt: {opt: adam, lr: 1e-4, eps: 1e-5, clip: 100, wd: 1e-6}
   type_critic_opt: {opt: adam, lr: 1e-4, eps: 1e-5, clip: 100, wd: 1e-6}

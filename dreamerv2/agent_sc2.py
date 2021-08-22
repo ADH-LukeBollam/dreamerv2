@@ -12,7 +12,7 @@ from losses.prob_chamfer_distance import prob_chamfer_distance
 
 
 class Sc2Agent(common.Module):
-    def __init__(self, config, logger, actspce, step, dataset):
+    def __init__(self, config, logger, actspce, step, dataset, action_required_args):
         self.config = config
         self._logger = logger
         self._action_space = actspce
@@ -22,8 +22,8 @@ class Sc2Agent(common.Module):
         with tf.device('cpu:0'):
             self.step = tf.Variable(int(self._counter), tf.int64)
         self._dataset = dataset
-        self.wm = Sc2WorldModel(self.step, config, actspce)
-        self._task_behavior = Sc2ActorCritic(config, self.step, self._action_space)
+        self.wm = Sc2WorldModel(self.step, config, actspce, action_required_args)
+        self._task_behavior = Sc2ActorCritic(config, self.step, self._action_space, action_required_args)
         reward = lambda f, s, a: self.wm.heads['reward'](f).mode()
         self._expl_behavior = dict(
             greedy=lambda: self._task_behavior,
@@ -90,12 +90,30 @@ class Sc2Agent(common.Module):
 
 class Sc2WorldModel(common.Module):
 
-    def __init__(self, step, config, actspace):
+    def __init__(self, step, config, actspace, act_required_args):
         self.step = step
         self.config = config
         self.rssm = common.Sc2RSSM(**config.rssm)
         self.heads = {}
         self.act_space = actspace
+
+        arg_space_sizes = {key: (value.n,) for (key, value) in actspace.items() if key != 'action_id'}
+        self.arg_actions = {}
+
+        # create a lookup to find which actions each arg is used for, because its a pain to do action-to-arg in TF when iterating by arg types
+        self.actions_using_arg = {}
+        for arg in arg_space_sizes:
+            acts = []
+            for act in (range(actspace['action_id'].n)):
+                if arg in act_required_args[act]:
+                    acts.append(act)
+            self.actions_using_arg[arg] = tf.constant(acts, dtype=tf.int32)
+
+        # create padded args to use when they aren't needed
+        self.padded_args = {}
+        for c in arg_space_sizes:
+            self.padded_args[c] = tf.constant(0, dtype=tf.float32, shape=(arg_space_sizes[c][0],))
+
         self.num_unit_types = len(get_unit_embed_lookup())
         self.action_input_order = self.get_action_input_order()
         self.encoder = common.Sc2Encoder(**config.encoder)
@@ -195,22 +213,33 @@ class Sc2WorldModel(common.Module):
             # only allow imagined available actions
             available_action_types = tf.cast(tf.stop_gradient(self.heads['available_actions'](feat).mode()), tf.float32)  # dont train the world model while imagining
             masked_actions = action_prob * available_action_types
-            chosen_action = tf.one_hot(tf.argmax(masked_actions, axis=-1), depth=tf.shape(action)[-1])
+            chosen_action_id = tf.argmax(masked_actions, axis=-1, output_type=tf.int32)
+            chosen_action_oh = tf.one_hot(chosen_action_id, depth=tf.shape(action)[-1])
 
-            feat_action = tf.concat([feat, chosen_action], -1)
+            feat_action = tf.concat([feat, chosen_action_oh], -1)
             arg_dict = {}
             action_set = {}
             arg_policy_out = arg_policy(feat_action)
-            for a in arg_policy_out:
-                arg_sample = arg_policy_out[a].sample()
-                arg_dict[a] = arg_sample
-                action_set[a] = arg_sample
+            for arg_key in arg_policy_out:
+
+                arg_vals = arg_policy_out[arg_key].sample()
+
+                # tile our chosen actions and compare against the required list
+                actions_needing_arg = self.actions_using_arg[arg_key]
+                actions_tiled = tf.tile(tf.expand_dims(chosen_action_id, -1), [1, tf.size(actions_needing_arg)])
+                needed = tf.greater(tf.math.count_nonzero(tf.equal(actions_tiled, actions_needing_arg), axis=-1, keepdims=True), 0)
+
+                # use the arg val if true, or padding value if false
+                arg_vals_padded = tf.map_fn(lambda inputs: tf.cond(inputs[0], lambda: inputs[1], lambda: self.padded_args[arg_key]), (needed, arg_vals), dtype=tf.float32)
+
+                arg_dict[arg_key] = arg_vals_padded
+                action_set[arg_key] = arg_vals_padded
             action_set['action_id'] = chosen_action
 
             action_vec = self.action_preprocess(action_set)
 
             succ = self.rssm.img_step(state, action_vec)
-            return succ, feat, chosen_action, arg_dict
+            return succ, feat, chosen_action_oh, arg_dict
 
         feat = 0 * self.rssm.get_feat(start)
 
@@ -322,7 +351,7 @@ class Sc2WorldModel(common.Module):
 
 class Sc2ActorCritic(common.Module):
 
-    def __init__(self, config, step, act_space):
+    def __init__(self, config, step, act_space, action_required_args):
         self.config = config
         self.step = step
         self.type_actor = common.Sc2MLP(act_space['action_id'].n, **config.type_actor)
@@ -330,6 +359,13 @@ class Sc2ActorCritic(common.Module):
         arg_space_sizes = {key: (value.n,) for (key, value) in act_space.items() if key != 'action_id'}
         self.arg_actor = common.Sc2CompositeMLP(arg_space_sizes, **config.arg_actor)
         self.arg_critic = common.Sc2MLP([], **config.arg_critic)
+        self.action_required_args = action_required_args
+
+        # create padded args to use when they aren't needed
+        padded_args = {}
+        for c in arg_space_sizes:
+            padded_args[c] = tf.constant(0, dtype=tf.float32, shape=(arg_space_sizes[c][0],))
+
         if config.slow_target:
             self._target_critic = common.Sc2MLP([], **config.type_critic)
             self._updates = tf.Variable(0, tf.int64)

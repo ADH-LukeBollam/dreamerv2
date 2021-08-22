@@ -101,6 +101,7 @@ print('Create envs.')
 train_envs = [make_env('train') for _ in range(config.num_envs)]
 eval_envs = [make_env('eval') for _ in range(config.num_envs)]
 action_space = train_envs[0].action_space
+action_req_args = train_envs[0].action_arg_lookup
 train_driver = common.Driver(train_envs)
 train_driver.on_episode(lambda ep: per_episode(ep, mode='train'))
 train_driver.on_step(lambda _: step.increment())
@@ -119,7 +120,7 @@ if prefill:
 print('Create agent.')
 train_dataset = iter(train_replay.dataset(**config.dataset))
 eval_dataset = iter(eval_replay.dataset(**config.dataset))
-agnt = agent_sc2.Sc2Agent(config, logger, action_space, step, train_dataset)
+agnt = agent_sc2.Sc2Agent(config, logger, action_space, step, train_dataset, action_req_args)
 if (logdir / 'variables.pkl').exists():
     agnt.load(logdir / 'variables.pkl')
 else:

@@ -57,7 +57,7 @@ flags.DEFINE_integer("game_steps_per_episode", None, "Game steps per episode.")
 flags.DEFINE_integer("max_episodes", 0, "Total episodes.")
 flags.DEFINE_integer("step_mul", 8, "Game steps per agent step.")
 
-flags.DEFINE_string("agent", "pysc2.agents.base_agent.BaseAgent",
+flags.DEFINE_string("agent", "pysc2.agents.random_agent.RandomAgent",
                     "Which agent to run, as a python path to an Agent class.")
 flags.DEFINE_string("agent_name", None,
                     "Name of the agent in replays. Defaults to the class name.")

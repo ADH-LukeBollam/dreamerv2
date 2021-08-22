@@ -2,6 +2,7 @@ import numpy as np
 import tensorflow as tf
 from tensorflow.keras import layers as tfkl
 from tensorflow_probability import distributions as tfd
+import tensorflow_probability as tfp
 from tensorflow.keras.mixed_precision import experimental as prec
 import common
 from models.unit_encoder import UnitEncoder

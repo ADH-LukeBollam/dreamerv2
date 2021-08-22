@@ -162,7 +162,6 @@ class Sc2:
         env = available_actions_printer.AvailableActionsPrinter(env)
         self._env = env
 
-
     @property
     def available_actions(self):
         return self._env.action_spec()[0]
@@ -172,17 +171,40 @@ class Sc2:
         image = gym.spaces.Box(0, 255, (64, 64, 3), dtype=np.uint8)
         return gym.spaces.Dict({'image': image})
 
+    def _get_arg_keys(self, arg_id):
+        keys = []
+        for i, size in enumerate(self.args_size_lookup[arg_id]):
+            keys.append(f'arg_{arg_id}_{i}')
+        return keys
+
     @property
     def action_space(self):
         action_id = gym.spaces.Discrete(len(self.action_embed_lookup))
         action_args = {'action_id': action_id}
 
         # the arg lookup is a dict of ranges of each arg, create a one-hot for each
-        for arg_key in self.args_size_lookup:
-            for i, size in enumerate(self.args_size_lookup[arg_key]):
-                action_args[f'arg_{arg_key}_{i}'] = gym.spaces.Discrete(size)
+        for arg_id in self.args_size_lookup:
+            arg_keys = self._get_arg_keys(arg_id)
+            for i, size in enumerate(self.args_size_lookup[arg_id]):
+                action_args[arg_keys[i]] = gym.spaces.Discrete(size)
 
         return action_args
+
+    # defines which actions require which args, used for training to prevent backprop through un-used arguments
+    # also used to input the correct args into the sc environment
+    @property
+    def action_arg_lookup(self):
+        action_spec = self._env.action_spec()[0]
+
+        action_arg_reqs = {}
+        for action_id in self.action_id_lookup:
+            args_list = []
+            required_args = action_spec.functions[self.action_id_lookup[action_id]].args
+            for r in required_args:
+                args_list += self._get_arg_keys(r.id)
+            action_arg_reqs[action_id] = args_list
+
+        return action_arg_reqs
 
     def step(self, action):
         args = []
@@ -194,8 +216,8 @@ class Sc2:
 
         for r in required_args:
             arg_set = []
-            for i, size in enumerate(self.args_size_lookup[r.id]):
-                arg_set.append(action[f'arg_{r.id}_{i}'])
+            for k in self._get_arg_keys(r.id):
+                arg_set.append(action[k])
             args.append(arg_set)
 
         sc2_action = actions.FunctionCall(action_id, args)

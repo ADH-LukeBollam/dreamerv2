@@ -1131,7 +1131,6 @@ _FUNCTIONS = [
     Function.ability(565, "UnloadAllAt_Overlord_minimap", cmd_minimap, 1408, 3669),
     Function.ability(566, "UnloadAllAt_WarpPrism_screen", cmd_screen, 913, 3669),
     Function.ability(567, "UnloadAllAt_WarpPrism_minimap", cmd_minimap, 913, 3669),
-    Function.ability(568, "UnloadUnit_quick", cmd_quick, 3796),
 ]
 # pylint: enable=line-too-long
 
