@@ -251,7 +251,6 @@ class Sc2MLP(common.Module):
         return self.get('out', Sc2DistLayer, self._shape, **self._out)(x)
 
 
-
 class Sc2CompositeMLP(common.Module):
 
     def __init__(self, shapes_dict, layers, units, act=tf.nn.elu, **out):
@@ -318,7 +317,7 @@ class Sc2DistLayer(common.Module):
         out = self.get('out', tfkl.Dense, np.prod(self._shape))(inputs)
         out = tf.reshape(out, tf.concat([tf.shape(inputs)[:-1], self._shape], 0))
         out = tf.cast(out, tf.float32)
-        if self._dist in ('normal', 'tanh_normal', 'trunc_normal'):
+        if self._dist in ('normal', 'tanh_normal', 'trunc_normal', 'normal_onehot'):
             std = self.get('std', tfkl.Dense, np.prod(self._shape))(inputs)
             std = tf.reshape(std, tf.concat([tf.shape(inputs)[:-1], self._shape], 0))
             std = tf.cast(std, tf.float32)
@@ -344,4 +343,9 @@ class Sc2DistLayer(common.Module):
             return tfd.Independent(dist, 1)
         if self._dist == 'onehot':
             return common.OneHotDist(out)
+        if self._dist == 'normal_onehot':
+            dist = tfd.Normal(out, std)
+            norm = tfd.Independent(dist, len(self._shape))
+            onehot = common.OneHotDist(out)
+            return norm, onehot
         NotImplementedError(self._dist)

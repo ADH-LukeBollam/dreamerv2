@@ -65,9 +65,9 @@ class UnitEncoder(common.Module):
 
     @tf.function
     def embed_unit_type(self, units):
-        unit_types = units[:, :, :, 0]
+        unit_types = units[..., 0]
         embedded_types = self.type_embedding(unit_types)
-        remaining_features = units[:, :, :, 1:]
+        remaining_features = units[..., 1:]
         embedded = tf.concat([embedded_types, remaining_features], axis=-1)
 
         return embedded

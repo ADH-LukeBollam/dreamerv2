@@ -138,7 +138,7 @@ def train_step(tran):
         for name, values in metrics.items():
             logger.scalar(name, np.array(values, np.float64).mean())
             metrics[name].clear()
-        logger.add(agnt.report(next(train_dataset)), prefix='train')
+        # logger.add(agnt.report(next(train_dataset)), prefix='train')
         logger.write(fps=True)
 
 
@@ -147,7 +147,7 @@ train_driver.on_step(train_step)
 while step < config.steps:
     logger.write()
     print('Start evaluation.')
-    logger.add(agnt.report(next(eval_dataset)), prefix='eval')
+    # logger.add(agnt.report(next(eval_dataset)), prefix='eval')
     eval_policy = functools.partial(agnt.policy, mode='eval')
     eval_driver(eval_policy, episodes=config.eval_eps)
     print('Start training.')

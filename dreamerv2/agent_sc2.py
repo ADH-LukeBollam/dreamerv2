@@ -16,6 +16,7 @@ class Sc2Agent(common.Module):
         self.config = config
         self._logger = logger
         self._action_space = actspce
+        self._act_size = sum([self._action_space[a].n for a in self._action_space])
         self._should_expl = elements.Until(int(
             config.expl_until / config.action_repeat))
         self._counter = step
@@ -39,8 +40,8 @@ class Sc2Agent(common.Module):
         tf.py_function(lambda: self.step.assign(
             int(self._counter), read_value=False), [], [])
         if state is None:
-            latent = self.wm.rssm.initial(len(obs['image']))
-            action = tf.zeros((len(obs['image']), self._num_act))
+            latent = self.wm.rssm.initial(len(obs['screen']))
+            action = tf.zeros((len(obs['screen']), self._act_size))
             state = latent, action
         elif obs['reset'].any():
             state = tf.nest.map_structure(lambda x: x * common.pad_dims(
@@ -51,13 +52,21 @@ class Sc2Agent(common.Module):
         latent, _ = self.wm.rssm.obs_step(latent, action, embed, sample)
         feat = self.wm.rssm.get_feat(latent)
         if mode == 'eval':
-            actor = self._task_behavior.type_actor(feat)
-            action = actor.mode()
+            action_norm, action_onehot = self._task_behavior.type_actor(feat)
+            action_prob = action_norm.mode()
+
+            available_action_types = tf.cast(obs['available_actions'], tf.float32)
+            masked_actions = action_prob * available_action_types
+            chosen_action_id = tf.argmax(masked_actions, axis=-1, output_type=tf.int32)
+            chosen_action_oh = tf.one_hot(chosen_action_id, depth=tf.shape(action)[-1])
+
+            feat_action = tf.concat([feat, chosen_action_oh], -1)
+            arg_policy_out = arg_policy(tf.stop_gradient(feat_action))
         elif self._should_expl(self.step):
-            actor = self._expl_behavior.type_actor(feat)
+            action_norm, action_onehot = self._expl_behavior.actor(feat)
             action = actor.sample()
         else:
-            actor = self._task_behavior.type_actor(feat)
+            actor = self._task_behavior.actor(feat)
             action = actor.sample()
         noise = {'train': self.config.expl_noise, 'eval': self.config.eval_noise}
         action = common.action_noise(action, noise[mode], self._action_space)
@@ -203,7 +212,8 @@ class Sc2WorldModel(common.Module):
         def step(prev, _):
             state, _, _, _ = prev
             feat = self.rssm.get_feat(state)
-            action_prob = action_policy(tf.stop_gradient(feat)).sample()
+            norm_policy, onehot_policy = action_policy(tf.stop_gradient(feat))
+            action_prob = norm_policy.sample()
 
             # only allow imagined available actions
             available_action_types = tf.cast(tf.stop_gradient(self.heads['available_actions'](feat).mode()), tf.float32)  # dont train the world model while imagining
@@ -212,9 +222,10 @@ class Sc2WorldModel(common.Module):
             chosen_action_oh = tf.one_hot(chosen_action_id, depth=tf.shape(action)[-1])
 
             feat_action = tf.concat([feat, chosen_action_oh], -1)
+            arg_policy_out = arg_policy(tf.stop_gradient(feat_action))    # dont train action policy while updating arg policy
+
             arg_dict = {}
             action_set = {}
-            arg_policy_out = arg_policy(feat_action)
             for arg_key in arg_policy_out:
 
                 # tile our chosen actions and check if this arg is required for each action
@@ -242,7 +253,8 @@ class Sc2WorldModel(common.Module):
 
         feat = 0 * self.rssm.get_feat(start)
 
-        action = action_policy(feat).mode()
+        norm_policy, onehot_policy = action_policy(feat)
+        action = norm_policy.mode()
         available_action_types = tf.cast(tf.stop_gradient(self.heads['available_actions'](feat).mode()), tf.float32)     # dont train avl action head while learning policy
         masked_actions = action * available_action_types
         chosen_action = tf.one_hot(tf.argmax(masked_actions, axis=-1), depth=tf.shape(action)[-1])
@@ -269,52 +281,52 @@ class Sc2WorldModel(common.Module):
 
         # screen preproc
         pp_screen_feat = []
-        pp_screen_feat.append(tf.one_hot(obs['screen'][:, :, :, :, 0], len(Visibility), dtype=tf.float32))  # screen visibility
-        pp_screen_feat.append(tf.cast(obs['screen'][:, :, :, :, 1:2], dtype=tf.float32) / 255.0 - 0.5)      # screen height
-        pp_screen_feat.append(tf.cast(obs['screen'][:, :, :, :, 2:5], dtype=tf.float32))                    # creep / buildable / pathable
-        pp_screen_feat.append(tf.one_hot(obs['screen'][:, :, :, :, 5], len(Effects), dtype=tf.float32))     # screen effects one-hot
-        obs['screen'] = tf.cast(tf.concat(pp_screen_feat, axis=4), dtype=dtype)
+        pp_screen_feat.append(tf.one_hot(obs['screen'][..., 0], len(Visibility), dtype=tf.float32))  # screen visibility
+        pp_screen_feat.append(tf.cast(obs['screen'][..., 1:2], dtype=tf.float32) / 255.0 - 0.5)      # screen height
+        pp_screen_feat.append(tf.cast(obs['screen'][..., 2:5], dtype=tf.float32))                    # creep / buildable / pathable
+        pp_screen_feat.append(tf.one_hot(obs['screen'][..., 5], len(Effects), dtype=tf.float32))     # screen effects one-hot
+        obs['screen'] = tf.cast(tf.concat(pp_screen_feat, axis=-1), dtype=dtype)
 
         # minimap preproc
         pp_mini_feat = []
-        pp_mini_feat.append(tf.one_hot(obs['mini'][:, :, :, :, 0], len(Visibility), dtype=tf.float32))      # minimap visibility
-        pp_mini_feat.append(tf.cast(obs['mini'][:, :, :, :, 1:2], dtype=tf.float32) / 255.0 - 0.5)          # minimap height
-        pp_mini_feat.append(tf.one_hot(obs['mini'][:, :, :, :, 2], len(PlayerRelative), dtype=tf.float32))  # minimap player relative unit alliance
-        pp_mini_feat.append(tf.cast(obs['mini'][:, :, :, :, 3:7], dtype=tf.float32) * 1.0)                  # creep / buildable / pathable / camera
-        obs['mini'] = tf.cast(tf.concat(pp_mini_feat, axis=4), dtype=dtype)
+        pp_mini_feat.append(tf.one_hot(obs['mini'][..., 0], len(Visibility), dtype=tf.float32))      # minimap visibility
+        pp_mini_feat.append(tf.cast(obs['mini'][..., 1:2], dtype=tf.float32) / 255.0 - 0.5)          # minimap height
+        pp_mini_feat.append(tf.one_hot(obs['mini'][..., 2], len(PlayerRelative), dtype=tf.float32))  # minimap player relative unit alliance
+        pp_mini_feat.append(tf.cast(obs['mini'][..., 3:7], dtype=tf.float32) * 1.0)                  # creep / buildable / pathable / camera
+        obs['mini'] = tf.cast(tf.concat(pp_mini_feat, axis=-1), dtype=dtype)
 
         # unit preproc
         pp_unit_features = []
-        pp_unit_features.append(tf.cast(obs['units'][:, :, :, 0:1], dtype=tf.float32))   # unit ids
-        pp_unit_features.append(tf.one_hot(obs['units'][:, :, :, 1] - 1, 4, dtype=tf.float32))              # alliance: self = 1, ally = 2, neutral, enemy, -1 so its 0 indexed
-        pp_unit_features.append(tf.cast(obs['units'][:, :, :, 2:5], dtype=tf.float32) / 255.0)              # health / shield / energy are all in scale 0-255
-        pp_unit_features.append(tf.cast(obs['units'][:, :, :, 5:6], dtype=tf.float32) / float(self.config.screen_size) - 0.5)   # x pos
-        pp_unit_features.append(tf.cast(obs['units'][:, :, :, 6:7], dtype=tf.float32) / float(self.config.screen_size) - 0.5)   # y pos
-        pp_unit_features.append(tf.cast(obs['units'][:, :, :, 7:8], dtype=tf.float32) / 5.0 - 0.5)          # radius: biggest units (command centers) have radius of 5
-        pp_unit_features.append(tf.cast(obs['units'][:, :, :, 8:12], dtype=tf.float32))                     # is_selected / is_blip / build_progress / is_powered
-        pp_unit_features.append(tf.cast(obs['units'][:, :, :, 12:13], dtype=tf.float32) / 1800.0 - 0.5)     # mineral count
-        pp_unit_features.append(tf.cast(obs['units'][:, :, :, 13:14], dtype=tf.float32) / 2250.0 - 0.5)     # vespene count
-        pp_unit_features.append(tf.cast(obs['units'][:, :, :, 14:15], dtype=tf.float32) / 8.0 - 0.5)        # cargo taken
-        pp_unit_features.append(tf.cast(obs['units'][:, :, :, 15:16], dtype=tf.float32) / 8.0 - 0.5)        # cargo max
-        pp_unit_features.append(tf.cast(obs['units'][:, :, :, 16:19], dtype=tf.float32))                    # is_flying / is_burrowed / is_in_cargo
-        pp_unit_features.append(tf.one_hot(obs['units'][:, :, :, 19] - 1, 4, dtype=tf.float32))             # cloak: Cloaked = 1, CloakedDetected = 2, NotCloaked = 3, Unknown = 4, -1 so its 0 indexed
-        pp_unit_features.append(tf.cast(obs['units'][:, :, :, 20:21], dtype=tf.float32))                    # is_hallucination
-        pp_unit_features.append(tf.cast(obs['units'][:, :, :, 21:22], dtype=tf.float32) / 3.0 - 0.5)        # attack upgrade
-        pp_unit_features.append(tf.cast(obs['units'][:, :, :, 22:23], dtype=tf.float32) / 3.0 - 0.5)        # armour upgrade
-        pp_unit_features.append(tf.cast(obs['units'][:, :, :, 23:24], dtype=tf.float32) / 3.0 - 0.5)        # shield upgrade
-        pp_unit_features.append(tf.cast(obs['units'][:, :, :, 24:65], dtype=tf.float32))                    # boolean buffs list
-        obs['units'] = tf.cast(tf.concat(pp_unit_features, axis=3), dtype=dtype)
+        pp_unit_features.append(tf.cast(obs['units'][..., 0:1], dtype=tf.float32))   # unit ids
+        pp_unit_features.append(tf.one_hot(obs['units'][..., 1] - 1, 4, dtype=tf.float32))              # alliance: self = 1, ally = 2, neutral, enemy, -1 so its 0 indexed
+        pp_unit_features.append(tf.cast(obs['units'][..., 2:5], dtype=tf.float32) / 255.0)              # health / shield / energy are all in scale 0-255
+        pp_unit_features.append(tf.cast(obs['units'][..., 5:6], dtype=tf.float32) / float(self.config.screen_size) - 0.5)   # x pos
+        pp_unit_features.append(tf.cast(obs['units'][..., 6:7], dtype=tf.float32) / float(self.config.screen_size) - 0.5)   # y pos
+        pp_unit_features.append(tf.cast(obs['units'][..., 7:8], dtype=tf.float32) / 5.0 - 0.5)          # radius: biggest units (command centers) have radius of 5
+        pp_unit_features.append(tf.cast(obs['units'][..., 8:12], dtype=tf.float32))                     # is_selected / is_blip / build_progress / is_powered
+        pp_unit_features.append(tf.cast(obs['units'][..., 12:13], dtype=tf.float32) / 1800.0 - 0.5)     # mineral count
+        pp_unit_features.append(tf.cast(obs['units'][..., 13:14], dtype=tf.float32) / 2250.0 - 0.5)     # vespene count
+        pp_unit_features.append(tf.cast(obs['units'][..., 14:15], dtype=tf.float32) / 8.0 - 0.5)        # cargo taken
+        pp_unit_features.append(tf.cast(obs['units'][..., 15:16], dtype=tf.float32) / 8.0 - 0.5)        # cargo max
+        pp_unit_features.append(tf.cast(obs['units'][..., 16:19], dtype=tf.float32))                    # is_flying / is_burrowed / is_in_cargo
+        pp_unit_features.append(tf.one_hot(obs['units'][..., 19] - 1, 4, dtype=tf.float32))             # cloak: Cloaked = 1, CloakedDetected = 2, NotCloaked = 3, Unknown = 4, -1 so its 0 indexed
+        pp_unit_features.append(tf.cast(obs['units'][..., 20:21], dtype=tf.float32))                    # is_hallucination
+        pp_unit_features.append(tf.cast(obs['units'][..., 21:22], dtype=tf.float32) / 3.0 - 0.5)        # attack upgrade
+        pp_unit_features.append(tf.cast(obs['units'][..., 22:23], dtype=tf.float32) / 3.0 - 0.5)        # armour upgrade
+        pp_unit_features.append(tf.cast(obs['units'][..., 23:24], dtype=tf.float32) / 3.0 - 0.5)        # shield upgrade
+        pp_unit_features.append(tf.cast(obs['units'][..., 24:65], dtype=tf.float32))                    # boolean buffs list
+        obs['units'] = tf.cast(tf.concat(pp_unit_features, axis=-1), dtype=dtype)
 
         # player preproc
         pp_player_features = []
         obs['player'] = tf.cast(obs['player'], dtype=tf.float32)
-        pp_player_features.append(tf.sqrt(obs['player'][:, :, 0:1]) / 50)    # player minerals
-        pp_player_features.append(tf.sqrt(obs['player'][:, :, 1:2]) / 50)    # player gas
-        pp_player_features.append(obs['player'][:, :, 2:3] / 200)            # supply used
-        pp_player_features.append(obs['player'][:, :, 3:4] / 200)            # supply max
-        pp_player_features.append(obs['player'][:, :, 4:5] / 10)             # warp gates
-        pp_player_features.append(obs['player'][:, :, 5:6] / 20)             # larva count
-        obs['player'] = tf.cast(tf.concat(pp_player_features, axis=2), dtype=dtype)
+        pp_player_features.append(tf.sqrt(obs['player'][..., 0:1]) / 50)    # player minerals
+        pp_player_features.append(tf.sqrt(obs['player'][..., 1:2]) / 50)    # player gas
+        pp_player_features.append(obs['player'][..., 2:3] / 200)            # supply used
+        pp_player_features.append(obs['player'][..., 3:4] / 200)            # supply max
+        pp_player_features.append(obs['player'][..., 4:5] / 10)             # warp gates
+        pp_player_features.append(obs['player'][..., 5:6] / 20)             # larva count
+        obs['player'] = tf.cast(tf.concat(pp_player_features, axis=-1), dtype=dtype)
 
         obs['available_actions'] = tf.cast(obs['available_actions'], dtype=dtype)
 
@@ -354,82 +366,138 @@ class Sc2ActorCritic(common.Module):
         self.config = config
         self.step = step
         self.type_actor = common.Sc2MLP(act_space['action_id'].n, **config.type_actor)
-        self.type_critic = common.Sc2MLP([], **config.type_critic)
         arg_space_sizes = {key: (value.n,) for (key, value) in act_space.items() if key != 'action_id'}
         self.arg_actor = common.Sc2CompositeMLP(arg_space_sizes, **config.arg_actor)
-        self.arg_critic = common.Sc2MLP([], **config.arg_critic)
+        self.critic = common.Sc2MLP([], **config.critic)
         self.action_required_args = action_required_args
 
-        # create padded args to use when they aren't needed
-        padded_args = {}
-        for c in arg_space_sizes:
-            padded_args[c] = tf.constant(0, dtype=tf.float32, shape=(arg_space_sizes[c][0],))
+        # create a lookup to find which actions each arg is used for, because its a pain to do action-to-arg in TF when iterating by arg types
+        self.actions_using_arg = {}
+        for arg in arg_space_sizes:
+            acts = []
+            for act in (range(act_space['action_id'].n)):
+                if arg in action_required_args[act]:
+                    acts.append(act)
+            self.actions_using_arg[arg] = tf.constant(acts, dtype=tf.int32)
 
         if config.slow_target:
-            self._target_critic = common.Sc2MLP([], **config.type_critic)
+            self._target_critic = common.Sc2MLP([], **config.critic)
             self._updates = tf.Variable(0, tf.int64)
         else:
-            self._target_critic = self.type_critic
+            self._target_critic = self.critic
         self.type_actor_opt = common.Optimizer('type_actor', **config.type_actor_opt)
-        self.type_critic_opt = common.Optimizer('type_critic', **config.type_critic_opt)
         self.arg_actor_opt = common.Optimizer('arg_actor', **config.arg_actor_opt)
-        self.arg_critic_opt = common.Optimizer('arg_critic', **config.arg_critic_opt)
+        self.critic_opt = common.Optimizer('critic', **config.critic_opt)
 
     def train(self, world_model, start, reward_fn):
         metrics = {}
         hor = self.config.imag_horizon
-        with tf.GradientTape() as actor_tape:
+        with tf.GradientTape(persistent=True) as actor_tape:
             feat, state, action, action_args, disc = world_model.imagine(self.type_actor, self.arg_actor, start, hor)
             reward = reward_fn(feat)
             target, weight, mets1 = self.target(feat, action, action_args, reward, disc)
 
-            type_actor_loss, mets2 = self.actor_loss('type', self.type_actor, self.type_critic, feat, action, target, weight)
-            feat_action = tf.concat([feat, action], -1)
-            arg_actor_loss, mets3 = self.actor_loss('arg', self.arg_actor, self.arg_critic, feat_action, action_args, target, weight)
+            type_actor_loss, mets2 = self.action_loss(feat, action, target, weight)
+            arg_actor_loss, mets3 = self.arg_loss(feat, action, action_args, target, weight)
 
         with tf.GradientTape() as critic_tape:
-            type_critic_loss, mets4 = self.critic_loss('type', self.type_critic, feat, action, action_args, target, weight)
-            arg_critic_loss, mets5 = self.critic_loss('arg', self.arg_critic, feat, action, action_args, target, weight)
+            critic_loss, mets4 = self.critic_loss(feat, action, action_args, target, weight)
 
         metrics.update(self.type_actor_opt(actor_tape, type_actor_loss, self.type_actor))
-        metrics.update(self.type_critic_opt(critic_tape, type_critic_loss, self.type_critic))
-        metrics.update(self.arg_actor_opt(actor_tape, arg_actor_loss, self.type_actor))
-        metrics.update(self.arg_critic_opt(critic_tape, arg_critic_loss, self.type_critic))
-        metrics.update(**mets1, **mets2, **mets3, **mets4, **mets5)
+        metrics.update(self.arg_actor_opt(actor_tape, arg_actor_loss, self.arg_actor))
+        del actor_tape
+        metrics.update(self.critic_opt(critic_tape, critic_loss, self.critic))
+        metrics.update(**mets1, **mets2, **mets3, **mets4)
         self.update_slow_target()  # Variables exist after first forward pass.
         return metrics
 
-    def actor_loss(self, name, actor_head, critic_head, feat, action, target, weight):
+    def action_loss(self, feat, action, target, weight):
         metrics = {}
-        policy = actor_head(tf.stop_gradient(feat))
+
+        norm_policy, onehot_policy = self.type_actor(tf.stop_gradient(feat))
+
         if self.config.actor_grad == 'dynamics':
             objective = target
         elif self.config.actor_grad == 'reinforce':
-            baseline = critic_head(feat[:-1]).mode()
+            baseline = self.critic(feat[:-1]).mode()
             advantage = tf.stop_gradient(target - baseline)
-            objective = policy.log_prob(action)[:-1] * advantage
+            objective = onehot_policy.log_prob(action)[:-1] * advantage
         elif self.config.actor_grad == 'both':
-            baseline = critic_head(feat[:-1]).mode()
+            baseline = self.critic(feat[:-1]).mode()
             advantage = tf.stop_gradient(target - baseline)
-            objective = policy.log_prob(action)[:-1] * advantage
+            objective = onehot_policy.log_prob(action)[:-1] * advantage
             mix = common.schedule(self.config.actor_grad_mix, self.step)
             objective = mix * target + (1 - mix) * objective
-            metrics[f'{name}_actor_grad_mix'] = mix
+            metrics[f'type_actor_grad_mix'] = mix
         else:
             raise NotImplementedError(self.config.actor_grad)
-        ent = policy.entropy()
+        ent = onehot_policy.entropy()
         ent_scale = common.schedule(self.config.actor_ent, self.step)
         objective += ent_scale * ent[:-1]
         actor_loss = -(weight[:-1] * objective).mean()
-        metrics[f'{name}_actor_ent'] = ent.mean()
-        metrics[f'{name}_actor_ent_scale'] = ent_scale
+        metrics[f'type_actor_ent'] = ent.mean()
+        metrics[f'type_actor_ent_scale'] = ent_scale
         return actor_loss, metrics
 
-    def critic_loss(self, name, critic_head, feat, action, action_args, target, weight):
-        dist = critic_head(feat)[:-1]
+    def arg_loss(self, feat, action, action_args, target, weight):
+        metrics = {}
+        chosen_action_id = tf.argmax(action, axis=-1, output_type=tf.int32)
+
+        feat_action = tf.concat([feat, action], -1)
+        policy = self.arg_actor(tf.stop_gradient(feat_action))
+
+        arg_head_losses = []
+        for arg_key in policy:
+
+            if self.config.actor_grad == 'dynamics':
+                objective = target
+            elif self.config.actor_grad == 'reinforce':
+                baseline = self.critic(feat[:-1]).mode()
+                advantage = tf.stop_gradient(target - baseline)
+                objective = policy[arg_key].log_prob(action_args[arg_key])[:-1] * advantage
+            elif self.config.actor_grad == 'both':
+                baseline = self.critic(feat[:-1]).mode()
+                advantage = tf.stop_gradient(target - baseline)
+                objective = policy[arg_key].log_prob(action_args[arg_key])[:-1] * advantage
+                mix = common.schedule(self.config.actor_grad_mix, self.step)
+                objective = mix * target + (1 - mix) * objective
+                metrics[f'{arg_key}_actor_grad_mix'] = mix
+            else:
+                raise NotImplementedError(self.config.actor_grad)
+
+            ent = policy[arg_key].entropy()
+            ent_scale = common.schedule(self.config.actor_ent, self.step)
+            objective += ent_scale * ent[:-1]
+
+            # # tile our chosen actions and check if this arg is required for each action
+            actions_needing_arg = self.actions_using_arg[arg_key]
+            actions_tiled = tf.tile(tf.expand_dims(chosen_action_id, -1), [1, 1, tf.size(actions_needing_arg)])
+            needed = tf.where(tf.greater(tf.math.count_nonzero(tf.equal(actions_tiled, actions_needing_arg), axis=-1), 0))
+
+            if tf.size(needed) > 0:
+                # only calculate losses for used args
+                weight_trimmed = weight[:-1]
+                weight_trimmed = tf.gather_nd(weight_trimmed, needed)
+                objective = tf.gather_nd(objective, needed)
+
+                actor_loss = -tf.reduce_mean(weight_trimmed * objective, axis=0, keepdims=True)
+                arg_head_losses.append(actor_loss)
+
+            metrics[f'{arg_key}_actor_ent'] = ent.mean()
+            metrics[f'{arg_key}_actor_ent_scale'] = ent_scale
+
+        arg_losses = tf.concat(arg_head_losses, axis=0)
+        # valid_losses = tf.where(tf.math.logical_not(tf.math.is_nan(arg_losses)))
+        # losses = tf.gather(arg_losses, valid_losses)
+        arg_loss = tf.reduce_mean(arg_losses)
+
+        return arg_loss, metrics
+
+    def critic_loss(self, feat, action, action_args, target, weight):
+        dist = self.critic(feat)[:-1]
         target = tf.stop_gradient(target)
         critic_loss = -(dist.log_prob(target) * weight[:-1]).mean()
-        metrics = {f'{name}_critic': dist.mode().mean()}
+        metrics = {f'critic': dist.mode().mean()}
         return critic_loss, metrics
 
     def target(self, feat, action, action_args, reward, disc):
@@ -453,6 +521,6 @@ class Sc2ActorCritic(common.Module):
             if self._updates % self.config.slow_target_update == 0:
                 mix = 1.0 if self._updates == 0 else float(
                     self.config.slow_target_fraction)
-                for s, d in zip(self.type_critic.variables, self._target_critic.variables):
+                for s, d in zip(self.critic.variables, self._target_critic.variables):
                     d.assign(mix * s + (1 - mix) * d)
             self._updates.assign_add(1)

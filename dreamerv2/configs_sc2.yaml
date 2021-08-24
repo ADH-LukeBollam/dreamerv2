@@ -17,7 +17,7 @@ defaults:
   dataset: {batch: 50, length: 50, oversample_ends: True}
   precision: 32
   jit: True
-  screen_size: 84
+  screen_size: 64
   mini_size: 64
 
   # Agent
@@ -54,14 +54,12 @@ defaults:
   model_opt: {opt: adam, lr: 3e-4, eps: 1e-5, clip: 100, wd: 1e-6}
 
   # Actor Critic
-  type_actor: {layers: 4, units: 400, act: elu, dist: normal, min_std: 0.1}
-  type_critic: {layers: 4, units: 400, act: elu, dist: mse}
-  arg_actor: {layers: 4, units: 400, act: elu, dist: normal, min_std: 0.1}
-  arg_critic: {layers: 4, units: 400, act: elu, dist: mse}
+  type_actor: {layers: 4, units: 400, act: elu, dist: normal_onehot }
+  arg_actor: {layers: 4, units: 400, act: elu, dist: onehot }
+  critic: {layers: 4, units: 400, act: elu, dist: mse}
   type_actor_opt: {opt: adam, lr: 1e-4, eps: 1e-5, clip: 100, wd: 1e-6}
-  type_critic_opt: {opt: adam, lr: 1e-4, eps: 1e-5, clip: 100, wd: 1e-6}
   arg_actor_opt: {opt: adam, lr: 1e-4, eps: 1e-5, clip: 100, wd: 1e-6}
-  arg_critic_opt: {opt: adam, lr: 1e-4, eps: 1e-5, clip: 100, wd: 1e-6}
+  critic_opt: {opt: adam, lr: 1e-4, eps: 1e-5, clip: 100, wd: 1e-6}
   discount: 0.99
   discount_lambda: 0.95
   imag_horizon: 15
