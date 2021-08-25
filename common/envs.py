@@ -224,7 +224,7 @@ class Sc2:
 
         timestep = self._env.step([sc2_action])[0]
         obs = self.collect_sc_observation(timestep)
-        reward = timestep.reward
+        reward = float(timestep.reward)
 
         done = False
         if timestep.last():
@@ -242,8 +242,6 @@ class Sc2:
     def collect_sc_observation(self, timestep):
         obs = {}
 
-        # store available actions, pad up to 30
-        actions_pad_size = 30
         av_actions = timestep.observation.available_actions
         action_indices = [self.action_embed_lookup[a] for a in av_actions]
         action_categorical = np.zeros(len(self.action_embed_lookup), dtype=np.int)
@@ -281,7 +279,7 @@ class Sc2:
                                      Player.warp_gate_count]]
 
         # units on the screen => limit to 200
-        size = 200
+        size = 30
         units = timestep.observation.feature_units
         unit_type_ids = list(units[:, 0])
 
@@ -476,8 +474,9 @@ class OneHotAction:
             reference = np.zeros_like(action[k])
             reference[index] = 1
             if not np.allclose(reference, action[k]):
-                raise ValueError(f'Invalid one-hot action:\n{action}')
-            action_indices[k] = index
+                action_indices[k] = -1
+            else:
+                action_indices[k] = index
         return self._env.step(action_indices)
 
     def reset(self):

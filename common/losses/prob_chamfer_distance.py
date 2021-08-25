@@ -27,7 +27,7 @@ def prob_chamfer_distance(set_dist, set_real, sizes):
     # achieve lower chamfer loss and not actually learn anything
     # slice off the known extras from our tensor, otherwise raggedTensor throws an error if the final ragged
     # tensor can be squeezed smaller than the initial size (ie. at least one row / column needs to be current size)
-    sizes_flat = tf.reshape(sizes, (-1))
+    sizes_flat = tf.reshape(sizes, (-1,))
     largest_unpadded_dim = tf.reduce_max(sizes_flat)
     log_probs_trimmed = log_probs[:, :largest_unpadded_dim, :largest_unpadded_dim]
 

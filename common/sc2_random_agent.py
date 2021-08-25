@@ -27,6 +27,4 @@ class Sc2RandomAgent:
                 output[k] = tf.one_hot(tf.argmax(rand[:, index:index+size], axis=-1), depth=size)
             index += size
 
-
-
         return output, None

@@ -17,6 +17,17 @@ class Sc2Agent(common.Module):
         self._logger = logger
         self._action_space = actspce
         self._act_size = sum([self._action_space[a].n for a in self._action_space])
+
+        # create a lookup to find which actions each arg is used for, because its a pain to do action-to-arg in TF when iterating by arg types
+        arg_space_sizes = {key: (value.n,) for (key, value) in actspce.items() if key != 'action_id'}
+        self.actions_using_arg = {}
+        for arg in arg_space_sizes:
+            acts = []
+            for act in (range(actspce['action_id'].n)):
+                if arg in action_required_args[act]:
+                    acts.append(act)
+            self.actions_using_arg[arg] = tf.constant(acts, dtype=tf.int32)
+
         self._should_expl = elements.Until(int(
             config.expl_until / config.action_repeat))
         self._counter = step
@@ -35,6 +46,52 @@ class Sc2Agent(common.Module):
         # Train step to initialize variables including optimizer statistics.
         self.train(next(self._dataset))
 
+    def get_sc2_action(self, type_actor, arg_actor, feat, available_actions, should_sample, mode):
+        action_norm, action_onehot = type_actor(feat)
+
+        if should_sample:
+            action_prob = action_norm.sample()
+        else:
+            action_prob = action_norm.mode()
+
+        noise = {'train': self.config.expl_noise, 'eval': self.config.eval_noise}
+        noise = noise[mode]
+        action_prob = common.sc2_action_noise(action_prob, noise)
+
+        available_action_types = tf.cast(available_actions, tf.float32)
+        masked_actions = action_prob * available_action_types
+        chosen_action_id = tf.argmax(masked_actions, axis=-1, output_type=tf.int32)
+        chosen_action_oh = tf.one_hot(chosen_action_id, depth=tf.shape(action_prob)[-1])
+
+        feat_action = tf.concat([feat, chosen_action_oh], -1)
+        arg_policy_out = arg_actor(tf.stop_gradient(feat_action))
+
+        action_set = {}
+        for arg_key in arg_policy_out:
+            # tile our chosen actions and check if this arg is required for each action
+            actions_needing_arg = self.actions_using_arg[arg_key]
+            actions_tiled = tf.tile(tf.expand_dims(chosen_action_id, -1), [1, tf.size(actions_needing_arg)])
+            needed = tf.cast(tf.greater(tf.math.count_nonzero(tf.equal(actions_tiled, actions_needing_arg), axis=-1), 0), tf.float32)
+
+            # get our arg vals and add a padding row
+            if should_sample:
+                arg_vals = arg_policy_out[arg_key].sample()
+            else:
+                arg_vals = arg_policy_out[arg_key].mode()
+
+            arg_vals = common.sc2_arg_noise(arg_vals, noise)
+            arg_vals_padded = tf.concat([tf.zeros((1, tf.shape(arg_vals)[1]), tf.float32), arg_vals], axis=0)
+
+            # only gather used arguments, get the padding row for everything else
+            all_indices = tf.range(0, tf.shape(arg_vals)[0], dtype=tf.float32) + 1  # bump all indexes by 1, and use 0 for a padding row
+            gather_indices = tf.cast(all_indices * needed, tf.int32)
+            padded_args = tf.gather(arg_vals_padded, gather_indices, axis=0)
+
+            action_set[arg_key] = padded_args
+        action_set['action_id'] = chosen_action_oh
+
+        return action_set
+
     @tf.function
     def policy(self, obs, state=None, mode='train'):
         tf.py_function(lambda: self.step.assign(
@@ -52,26 +109,16 @@ class Sc2Agent(common.Module):
         latent, _ = self.wm.rssm.obs_step(latent, action, embed, sample)
         feat = self.wm.rssm.get_feat(latent)
         if mode == 'eval':
-            action_norm, action_onehot = self._task_behavior.type_actor(feat)
-            action_prob = action_norm.mode()
-
-            available_action_types = tf.cast(obs['available_actions'], tf.float32)
-            masked_actions = action_prob * available_action_types
-            chosen_action_id = tf.argmax(masked_actions, axis=-1, output_type=tf.int32)
-            chosen_action_oh = tf.one_hot(chosen_action_id, depth=tf.shape(action)[-1])
-
-            feat_action = tf.concat([feat, chosen_action_oh], -1)
-            arg_policy_out = arg_policy(tf.stop_gradient(feat_action))
+            action_set = self.get_sc2_action(self._task_behavior.type_actor, self._task_behavior.arg_actor, feat, obs['available_actions'], False, mode)
         elif self._should_expl(self.step):
-            action_norm, action_onehot = self._expl_behavior.actor(feat)
-            action = actor.sample()
+            action_set = self.get_sc2_action(self._expl_behavior.type_actor, self._expl_behavior.arg_actor, feat, obs['available_actions'], True, mode)
         else:
-            actor = self._task_behavior.actor(feat)
-            action = actor.sample()
-        noise = {'train': self.config.expl_noise, 'eval': self.config.eval_noise}
-        action = common.action_noise(action, noise[mode], self._action_space)
-        outputs = {'action': action}
-        state = (latent, action)
+            action_set = self.get_sc2_action(self._task_behavior.type_actor, self._task_behavior.arg_actor, feat, obs['available_actions'], True, mode)
+
+        outputs = action_set
+
+        action_vec = self.wm.action_preprocess(action_set)
+        state = (latent, action_vec)
         return outputs, state
 
     @tf.function
@@ -106,10 +153,8 @@ class Sc2WorldModel(common.Module):
         self.heads = {}
         self.act_space = actspace
 
-        arg_space_sizes = {key: (value.n,) for (key, value) in actspace.items() if key != 'action_id'}
-        self.arg_actions = {}
-
         # create a lookup to find which actions each arg is used for, because its a pain to do action-to-arg in TF when iterating by arg types
+        arg_space_sizes = {key: (value.n,) for (key, value) in actspace.items() if key != 'action_id'}
         self.actions_using_arg = {}
         for arg in arg_space_sizes:
             acts = []
@@ -219,7 +264,7 @@ class Sc2WorldModel(common.Module):
             available_action_types = tf.cast(tf.stop_gradient(self.heads['available_actions'](feat).mode()), tf.float32)  # dont train the world model while imagining
             masked_actions = action_prob * available_action_types
             chosen_action_id = tf.argmax(masked_actions, axis=-1, output_type=tf.int32)
-            chosen_action_oh = tf.one_hot(chosen_action_id, depth=tf.shape(action)[-1])
+            chosen_action_oh = tf.one_hot(chosen_action_id, depth=tf.shape(action_prob)[-1])
 
             feat_action = tf.concat([feat, chosen_action_oh], -1)
             arg_policy_out = arg_policy(tf.stop_gradient(feat_action))    # dont train action policy while updating arg policy
@@ -244,7 +289,7 @@ class Sc2WorldModel(common.Module):
 
                 arg_dict[arg_key] = padded_args
                 action_set[arg_key] = padded_args
-            action_set['action_id'] = chosen_action
+            action_set['action_id'] = chosen_action_oh
 
             action_vec = self.action_preprocess(action_set)
 
@@ -411,6 +456,7 @@ class Sc2ActorCritic(common.Module):
         self.update_slow_target()  # Variables exist after first forward pass.
         return metrics
 
+    @tf.function
     def action_loss(self, feat, action, target, weight):
         metrics = {}
 
@@ -439,6 +485,7 @@ class Sc2ActorCritic(common.Module):
         metrics[f'type_actor_ent_scale'] = ent_scale
         return actor_loss, metrics
 
+    @tf.function
     def arg_loss(self, feat, action, action_args, target, weight):
         metrics = {}
         chosen_action_id = tf.argmax(action, axis=-1, output_type=tf.int32)
@@ -446,7 +493,7 @@ class Sc2ActorCritic(common.Module):
         feat_action = tf.concat([feat, action], -1)
         policy = self.arg_actor(tf.stop_gradient(feat_action))
 
-        arg_head_losses = []
+        arg_head_losses = tf.TensorArray(tf.float32, size=len(policy))
         for arg_key in policy:
 
             if self.config.actor_grad == 'dynamics':

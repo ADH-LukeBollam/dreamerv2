@@ -110,6 +110,21 @@ def action_noise(action, amount, action_space):
     return tf.clip_by_value(tfd.Normal(action, amount).sample(), -1, 1)
 
 
+def sc2_action_noise(action, amount):
+  if amount == 0:
+    return action
+  amount = tf.cast(amount, action.dtype)
+  return tfd.Normal(action, amount).sample()
+
+
+def sc2_arg_noise(action, amount):
+  if amount == 0:
+    return action
+  probs = amount / action.shape[-1] + (1 - amount) * action
+  return dists.OneHotDist(probs=probs).sample()
+
+
+
 def pad_dims(tensor, total_dims):
   while len(tensor.shape) < total_dims:
     tensor = tensor[..., None]
