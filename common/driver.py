@@ -29,6 +29,7 @@ class Driver:
 
   def __call__(self, policy, steps=0, episodes=0):
     step, episode = 0, 0
+
     while step < steps or episode < episodes:
       for i, done in enumerate(self._dones):
         if done:

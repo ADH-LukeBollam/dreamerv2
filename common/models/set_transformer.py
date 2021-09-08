@@ -1,5 +1,4 @@
 import tensorflow as tf
-from tensorflow.keras.mixed_precision import experimental as prec
 
 
 # implementation based off https://www.tensorflow.org/tutorials/text/transformer

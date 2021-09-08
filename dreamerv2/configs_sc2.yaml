@@ -14,7 +14,7 @@ defaults:
   image_size: [64, 64]
   grayscale: False
   replay_size: 2e6
-  dataset: {batch: 10, length: 50, oversample_ends: True}
+  dataset: {batch: 3, length: 30, oversample_ends: True}
   precision: 32
   jit: True
   screen_size: 64
@@ -26,7 +26,7 @@ defaults:
   train_steps: 1
   pretrain: 0
   clip_rewards: identity
-  expl_noise: 0.0
+  expl_noise: 0.1
   expl_behavior: greedy
   expl_until: 0
   eval_noise: 0.0
@@ -91,7 +91,7 @@ sc2:
   steps: 2e8
   eval_every: 1e5
   log_every: 1e5
-  prefill: 200000
+  prefill: 5000
   grayscale: True
   train_every: 16
   clip_rewards: tanh
@@ -115,5 +115,5 @@ debug:
   prefill: 100
   pretrain: 1
   train_steps: 1
-  dataset.batch: 10
+  dataset.batch: 5
   dataset.length: 10

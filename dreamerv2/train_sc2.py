@@ -30,6 +30,8 @@ import agent_sc2
 import elements
 import common
 
+tf.debugging.set_log_device_placement(True)
+
 configs = pathlib.Path(sys.argv[0]).parent / 'configs_sc2.yaml'
 configs = yaml.safe_load(configs.read_text())
 config = elements.Config(configs['defaults'])
@@ -145,6 +147,7 @@ def train_step(tran):
 train_driver.on_step(train_step)
 
 while step < config.steps:
+
     logger.write()
     print('Start evaluation.')
     # logger.add(agnt.report(next(eval_dataset)), prefix='eval')
@@ -153,6 +156,7 @@ while step < config.steps:
     print('Start training.')
     train_driver(agnt.policy, steps=config.eval_every)
     agnt.save(logdir / 'variables.pkl')
+
 for env in train_envs + eval_envs:
     try:
         env.close()

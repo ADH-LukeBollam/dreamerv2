@@ -59,7 +59,7 @@ class Sc2Agent(common.Module):
         action_prob = common.sc2_action_noise(action_prob, noise)
 
         available_action_types = tf.cast(available_actions, tf.float32)
-        masked_actions = action_prob * available_action_types
+        masked_actions = action_prob * available_action_types + available_action_types  # scale unavailable actions to 0, then available actions get a +1 bonus so that if everything is 0, they are still higher
         chosen_action_id = tf.argmax(masked_actions, axis=-1, output_type=tf.int32)
         chosen_action_oh = tf.one_hot(chosen_action_id, depth=tf.shape(action_prob)[-1])
 
@@ -262,7 +262,7 @@ class Sc2WorldModel(common.Module):
 
             # only allow imagined available actions
             available_action_types = tf.cast(tf.stop_gradient(self.heads['available_actions'](feat).mode()), tf.float32)  # dont train the world model while imagining
-            masked_actions = action_prob * available_action_types
+            masked_actions = action_prob * available_action_types + available_action_types  # scale unavailable actions to 0, then available actions get a +1 bonus so that if everything is 0, they are still higher
             chosen_action_id = tf.argmax(masked_actions, axis=-1, output_type=tf.int32)
             chosen_action_oh = tf.one_hot(chosen_action_id, depth=tf.shape(action_prob)[-1])
 
@@ -301,7 +301,7 @@ class Sc2WorldModel(common.Module):
         norm_policy, onehot_policy = action_policy(feat)
         action = norm_policy.mode()
         available_action_types = tf.cast(tf.stop_gradient(self.heads['available_actions'](feat).mode()), tf.float32)     # dont train avl action head while learning policy
-        masked_actions = action * available_action_types
+        masked_actions = action * available_action_types + available_action_types  # scale unavailable actions to 0, then available actions get a +1 bonus so that if everything is 0, they are still higher
         chosen_action = tf.one_hot(tf.argmax(masked_actions, axis=-1), depth=tf.shape(action)[-1])
 
         feat_action = tf.concat([feat, chosen_action], -1)
@@ -493,7 +493,8 @@ class Sc2ActorCritic(common.Module):
         feat_action = tf.concat([feat, action], -1)
         policy = self.arg_actor(tf.stop_gradient(feat_action))
 
-        arg_head_losses = tf.TensorArray(tf.float32, size=len(policy))
+        arg_head_losses = tf.TensorArray(tf.float32, size=0, dynamic_size=True)
+        num_args_used = 0
         for arg_key in policy:
 
             if self.config.actor_grad == 'dynamics':
@@ -528,14 +529,13 @@ class Sc2ActorCritic(common.Module):
                 objective = tf.gather_nd(objective, needed)
 
                 actor_loss = -tf.reduce_mean(weight_trimmed * objective, axis=0, keepdims=True)
-                arg_head_losses.append(actor_loss)
+                arg_head_losses = arg_head_losses.write(num_args_used, actor_loss)
+                num_args_used += 1
 
             metrics[f'{arg_key}_actor_ent'] = ent.mean()
             metrics[f'{arg_key}_actor_ent_scale'] = ent_scale
 
-        arg_losses = tf.concat(arg_head_losses, axis=0)
-        # valid_losses = tf.where(tf.math.logical_not(tf.math.is_nan(arg_losses)))
-        # losses = tf.gather(arg_losses, valid_losses)
+        arg_losses = arg_head_losses.concat()
         arg_loss = tf.reduce_mean(arg_losses)
 
         return arg_loss, metrics

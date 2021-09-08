@@ -13,9 +13,9 @@ try:
 except ImportError:
     pass
 
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-logging.getLogger().setLevel('ERROR')
-warnings.filterwarnings('ignore', '.*box bound precision lowered.*')
+# os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+# logging.getLogger().setLevel('ERROR')
+# warnings.filterwarnings('ignore', '.*box bound precision lowered.*')
 
 sys.path.append(str(pathlib.Path(__file__).parent))
 sys.path.append(str(pathlib.Path(__file__).parent.parent))
@@ -27,6 +27,8 @@ import tensorflow as tf
 import agent
 import elements
 import common
+
+tf.debugging.set_log_device_placement(True)
 
 configs = pathlib.Path(sys.argv[0]).parent / 'configs.yaml'
 configs = yaml.safe_load(configs.read_text())
