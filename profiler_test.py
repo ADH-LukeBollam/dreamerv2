@@ -49,11 +49,12 @@ model.compile(
 # Create a TensorBoard callback
 logs = "logs/" + datetime.now().strftime("%Y%m%d-%H%M%S")
 
-tboard_callback = tf.keras.callbacks.TensorBoard(log_dir = logs,
-                                                 histogram_freq = 1,
-                                                 profile_batch = '500,520')
 
-model.fit(ds_train,
-          epochs=2,
-          validation_data=ds_test,
-          callbacks = [tboard_callback])
+tf.profiler.experimental.start(logs)
+iterator = iter(ds_train)
+for step in range(100):
+    with tf.profiler.experimental.Trace('train', step_num=step, _r=1):
+        train_data, labels = iterator.get_next()
+        model(train_data)
+
+tf.profiler.experimental.stop()

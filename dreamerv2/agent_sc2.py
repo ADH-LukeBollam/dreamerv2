@@ -9,7 +9,7 @@ from models.unit_encoder import UnitDecoder
 from pysc2.lib.features import Visibility, Effects, PlayerRelative
 from pysc2.lib.units import get_unit_embed_lookup
 from losses.prob_chamfer_distance import prob_chamfer_distance
-
+from sc2_nets import Sc2ScreenDecoder
 
 class Sc2Agent(common.Module):
     def __init__(self, config, logger, actspce, step, dataset, action_required_args):
@@ -167,7 +167,7 @@ class Sc2WorldModel(common.Module):
         self.action_input_order = self.get_action_input_order()
         self.encoder = common.Sc2Encoder(**config.encoder)
         self.heads['available_actions'] = common.MLP(actspace['action_id'].n, **config.avl_action_head)
-        self.heads['screen'] = common.ConvDecoder((config.screen_size, config.screen_size, 20), **config.decoder)
+        self.heads['screen'] = Sc2ScreenDecoder(config.screen_size, **config.decoder)
         self.heads['mini'] = common.ConvDecoder((config.mini_size, config.mini_size, 13), **config.decoder)
         self.heads['player'] = common.MLP(6, **config.player_head)
         self.heads['unit_init_set'] = SetPrior(86)     # after embedding unit type to 16 features, units have 86 features each
@@ -235,6 +235,12 @@ class Sc2WorldModel(common.Module):
                 like = tf.cast(prob_chamfer_distance(unit_probs, unit_label, set_sizes), tf.float32)
                 likes[name] = like
                 losses[name] = -like.mean()
+            elif name == 'screen':
+                out_probs = head(inp)
+                for k in out_probs:
+                    like = tf.cast(out_probs[k].log_prob(data[k]), tf.float32)
+                    likes[k] = like
+                    losses[k] = -like.mean()
             else:
                 like = tf.cast(head(inp).log_prob(data[name]), tf.float32)
                 likes[name] = like
@@ -325,12 +331,13 @@ class Sc2WorldModel(common.Module):
         obs = obs.copy()
 
         # screen preproc
-        pp_screen_feat = []
-        pp_screen_feat.append(tf.one_hot(obs['screen'][..., 0], len(Visibility), dtype=tf.float32))  # screen visibility
-        pp_screen_feat.append(tf.cast(obs['screen'][..., 1:2], dtype=tf.float32) / 255.0 - 0.5)      # screen height
-        pp_screen_feat.append(tf.cast(obs['screen'][..., 2:5], dtype=tf.float32))                    # creep / buildable / pathable
-        pp_screen_feat.append(tf.one_hot(obs['screen'][..., 5], len(Effects), dtype=tf.float32))     # screen effects one-hot
-        obs['screen'] = tf.cast(tf.concat(pp_screen_feat, axis=-1), dtype=dtype)
+        obs['screen_visibility'] = tf.one_hot(obs['screen'][..., 0], len(Visibility), dtype=tf.float32)  # screen visibility
+        obs['screen_height'] = tf.cast(obs['screen'][..., 1:2], dtype=tf.float32) / 255.0 - 0.5      # screen height
+        obs['screen_creep'] = tf.cast(obs['screen'][..., 2:3], dtype=tf.float32)                  # creep / buildable / pathable
+        obs['screen_buildable'] = tf.cast(obs['screen'][..., 3:4], dtype=tf.float32)
+        obs['screen_pathable'] = tf.cast(obs['screen'][..., 4:5], dtype=tf.float32)
+        obs['screen_effects'] = tf.one_hot(obs['screen'][..., 5], len(Effects), dtype=tf.float32)     # screen effects one-hot
+        del obs['screen']
 
         # minimap preproc
         pp_mini_feat = []
@@ -342,7 +349,7 @@ class Sc2WorldModel(common.Module):
 
         # unit preproc
         pp_unit_features = []
-        pp_unit_features.append(tf.cast(obs['units'][..., 0:1], dtype=tf.float32))   # unit ids
+        pp_unit_features.append(tf.cast(obs['units'][..., 0:1], dtype=tf.float32))                      # unit ids
         pp_unit_features.append(tf.one_hot(obs['units'][..., 1] - 1, 4, dtype=tf.float32))              # alliance: self = 1, ally = 2, neutral, enemy, -1 so its 0 indexed
         pp_unit_features.append(tf.cast(obs['units'][..., 2:5], dtype=tf.float32) / 255.0)              # health / shield / energy are all in scale 0-255
         pp_unit_features.append(tf.cast(obs['units'][..., 5:6], dtype=tf.float32) / float(self.config.screen_size) - 0.5)   # x pos

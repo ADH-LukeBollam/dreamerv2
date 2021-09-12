@@ -30,8 +30,6 @@ import agent_sc2
 import elements
 import common
 
-tf.debugging.set_log_device_placement(True)
-
 configs = pathlib.Path(sys.argv[0]).parent / 'configs_sc2.yaml'
 configs = yaml.safe_load(configs.read_text())
 config = elements.Config(configs['defaults'])
@@ -133,9 +131,12 @@ else:
 
 def train_step(tran):
     if should_train(step):
+        tf.profiler.experimental.start(str(logdir))
         for _ in range(config.train_steps):
-            _, mets = agnt.train(next(train_dataset))
-            [metrics[key].append(value) for key, value in mets.items()]
+            with tf.profiler.experimental.Trace('train', step_num=step, _r=1):
+                _, mets = agnt.train(next(train_dataset))
+                [metrics[key].append(value) for key, value in mets.items()]
+        tf.profiler.experimental.stop()
     if should_log(step):
         for name, values in metrics.items():
             logger.scalar(name, np.array(values, np.float64).mean())

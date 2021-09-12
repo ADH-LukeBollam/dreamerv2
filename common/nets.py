@@ -210,7 +210,8 @@ class ConvDecoder(common.Module):
         act = None
       x = self.get(f'h{i}', ConvT, depth, kernel, 2, activation=act)(x)
     mean = tf.reshape(x, tf.concat([tf.shape(features)[:-1], self._shape], 0))
-    dist = tfd.Independent(tfd.Normal(mean, 1), len(self._shape))
+    dist = tfd.Normal(mean, 1)
+    dist = tfd.Independent(dist, len(self._shape))
     return dist
 
 

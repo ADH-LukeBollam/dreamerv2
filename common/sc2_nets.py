@@ -6,6 +6,7 @@ import tensorflow_probability as tfp
 from tensorflow.keras.mixed_precision import experimental as prec
 import common
 from models.unit_encoder import UnitEncoder
+from pysc2.lib.features import Visibility, Effects
 
 
 class Sc2RSSM(common.Module):
@@ -164,7 +165,10 @@ class Sc2Encoder(common.Module):
     @tf.function
     def __call__(self, obs):
         avl_actions = self._avl_action_encoder(obs['available_actions'])
-        screen = self._screen_encoder(obs['screen'])
+
+        screen_obs = tf.concat([obs['screen_visibility'], obs['screen_height'], obs['screen_creep'], obs['screen_buildable'], obs['screen_pathable'], obs['screen_effects']], axis=-1)
+        screen = self._screen_encoder(screen_obs)
+
         minimap = self._minimap_encoder(obs['mini'])
         player = self._player_encoder(obs['player'])
         units = self._unit_encoder(obs['units'])
@@ -211,11 +215,10 @@ class Sc2ConvEncoder(common.Module):
         return tf.reshape(x, shape)
 
 
-class Sc2ConvDecoder(common.Module):
+class Sc2ScreenDecoder(common.Module):
 
-    def __init__(
-        self, shape=(64, 64, 3), depth=32, act=tf.nn.elu, kernels=(5, 5, 6, 6)):
-        self._shape = shape
+    def __init__(self, screen_size, depth=32, act=tf.nn.elu, kernels=(5, 5, 6, 6)):
+        self._screen_shape = (screen_size, screen_size)
         self._depth = depth
         self._act = getattr(tf.nn, act) if isinstance(act, str) else act
         self._kernels = kernels
@@ -227,16 +230,23 @@ class Sc2ConvDecoder(common.Module):
         for i, kernel in enumerate(self._kernels):
             depth = 2 ** (len(self._kernels) - i - 2) * self._depth
             act = self._act
-            if i == len(self._kernels) - 1:
-                depth = self._shape[-1]
-                act = None
             x = self.get(f'h{i}', ConvT, depth, kernel, 2, activation=act)(x)
-        mean = tf.reshape(x, tf.concat([tf.shape(features)[:-1], self._shape], 0))
-        return tfd.Independent(tfd.Normal(mean, 1), len(self._shape))
+
+        processed = tf.reshape(x, tf.concat([tf.shape(features)[:-1], self._screen_shape, (int(depth),)], 0))
+
+        outs = {}
+
+        outs['screen_visibility'] = self.get('screen_visibility_out', Sc2DistLayer, (len(Visibility),), 'onehot_batch', dist_shape=self._screen_shape + (len(Visibility),))(processed)
+        outs['screen_height'] = self.get('screen_height_out', Sc2DistLayer, (1,), 'mse', dist_shape=self._screen_shape + (1,))(processed)
+        outs['screen_creep'] = self.get('screen_creep_out', Sc2DistLayer, (1,), 'binary', dist_shape=self._screen_shape + (1,))(processed)
+        outs['screen_buildable'] = self.get('screen_buildable_out', Sc2DistLayer, (1,), 'binary', dist_shape=self._screen_shape + (1,))(processed)
+        outs['screen_pathable'] = self.get('screen_pathable_out', Sc2DistLayer, (1,), 'binary', dist_shape=self._screen_shape + (1,))(processed)
+        outs['screen_effects'] = self.get('screen_effects_out', Sc2DistLayer, (len(Effects),), 'binary', dist_shape=self._screen_shape + (len(Effects),))(processed)
+
+        return outs
 
 
 class Sc2MLP(common.Module):
-
     def __init__(self, shape, layers, units, act=tf.nn.elu, **out):
         self._shape = (shape,) if isinstance(shape, int) else shape
         self._layers = layers
@@ -307,35 +317,39 @@ class Sc2GRUCell(tf.keras.layers.AbstractRNNCell):
 
 class Sc2DistLayer(common.Module):
 
-    def __init__(self, shape, dist='mse', min_std=0.1, init_std=0.0):
+    def __init__(self, shape, dist='mse', min_std=0.1, init_std=0.0, dist_shape=None):
         self._shape = shape
         self._dist = dist
         self._min_std = min_std
         self._init_std = init_std
+        if dist_shape is None:
+            self._dist_shape = self._shape
+        else:
+            self._dist_shape = dist_shape
 
     def __call__(self, inputs):
         out = self.get('out', tfkl.Dense, np.prod(self._shape))(inputs)
         out = tf.reshape(out, tf.concat([tf.shape(inputs)[:-1], self._shape], 0))
         out = tf.cast(out, tf.float32)
         if self._dist in ('normal', 'tanh_normal', 'trunc_normal', 'normal_onehot'):
-            std = self.get('std', tfkl.Dense, np.prod(self._shape))(inputs)
-            std = tf.reshape(std, tf.concat([tf.shape(inputs)[:-1], self._shape], 0))
+            std = self.get('std', tfkl.Dense, np.prod(self._dist_shape))(inputs)
+            std = tf.reshape(std, tf.concat([tf.shape(inputs)[:-1], self._dist_shape], 0))
             std = tf.cast(std, tf.float32)
         if self._dist == 'mse':
             dist = tfd.Normal(out, 1.0)
-            return tfd.Independent(dist, len(self._shape))
+            return tfd.Independent(dist, len(self._dist_shape))
         if self._dist == 'normal':
             dist = tfd.Normal(out, std)
-            return tfd.Independent(dist, len(self._shape))
+            return tfd.Independent(dist, len(self._dist_shape))
         if self._dist == 'binary':
             dist = tfd.Bernoulli(out)
-            return tfd.Independent(dist, len(self._shape))
+            return tfd.Independent(dist, len(self._dist_shape))
         if self._dist == 'tanh_normal':
             mean = 5 * tf.tanh(out / 5)
             std = tf.nn.softplus(std + self._init_std) + self._min_std
             dist = tfd.Normal(mean, std)
             dist = tfd.TransformedDistribution(dist, common.TanhBijector())
-            dist = tfd.Independent(dist, len(self._shape))
+            dist = tfd.Independent(dist, len(self._dist_shape))
             return common.SampleDist(dist)
         if self._dist == 'trunc_normal':
             std = 2 * tf.nn.sigmoid((std + self._init_std) / 2) + self._min_std
@@ -343,9 +357,12 @@ class Sc2DistLayer(common.Module):
             return tfd.Independent(dist, 1)
         if self._dist == 'onehot':
             return common.OneHotDist(out)
+        if self._dist == 'onehot_batch':
+            onehot = common.OneHotDist(out)
+            return tfd.Independent(onehot, len(self._dist_shape) - 1)
         if self._dist == 'normal_onehot':
             dist = tfd.Normal(out, std)
-            norm = tfd.Independent(dist, len(self._shape))
+            norm = tfd.Independent(dist, len(self._dist_shape))
             onehot = common.OneHotDist(out)
             return norm, onehot
         NotImplementedError(self._dist)
