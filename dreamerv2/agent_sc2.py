@@ -238,7 +238,7 @@ class Sc2WorldModel(common.Module):
             elif name == 'screen':
                 out_probs = head(inp)
                 for k in out_probs:
-                    like = tf.cast(out_probs[k].log_prob(data[k]), tf.float32)
+                    like = tf.cast(out_probs[k].log_prob(tf.cast(data[k], out_probs[k].dtype)), tf.float32)
                     likes[k] = like
                     losses[k] = -like.mean()
             else:
@@ -331,12 +331,12 @@ class Sc2WorldModel(common.Module):
         obs = obs.copy()
 
         # screen preproc
-        obs['screen_visibility'] = tf.one_hot(obs['screen'][..., 0], len(Visibility), dtype=tf.float32)  # screen visibility
-        obs['screen_height'] = tf.cast(obs['screen'][..., 1:2], dtype=tf.float32) / 255.0 - 0.5      # screen height
-        obs['screen_creep'] = tf.cast(obs['screen'][..., 2:3], dtype=tf.float32)                  # creep / buildable / pathable
-        obs['screen_buildable'] = tf.cast(obs['screen'][..., 3:4], dtype=tf.float32)
-        obs['screen_pathable'] = tf.cast(obs['screen'][..., 4:5], dtype=tf.float32)
-        obs['screen_effects'] = tf.one_hot(obs['screen'][..., 5], len(Effects), dtype=tf.float32)     # screen effects one-hot
+        obs['screen_visibility'] = tf.one_hot(obs['screen'][..., 0], len(Visibility), dtype=dtype)  # screen visibility
+        obs['screen_height'] = tf.cast(obs['screen'][..., 1:2], dtype=dtype) / 255.0 - 0.5      # screen height
+        obs['screen_creep'] = tf.cast(obs['screen'][..., 2:3], dtype=dtype)                  # creep / buildable / pathable
+        obs['screen_buildable'] = tf.cast(obs['screen'][..., 3:4], dtype=dtype)
+        obs['screen_pathable'] = tf.cast(obs['screen'][..., 4:5], dtype=dtype)
+        obs['screen_effects'] = tf.one_hot(obs['screen'][..., 5], len(Effects), dtype=dtype)     # screen effects one-hot
         del obs['screen']
 
         # minimap preproc
@@ -348,26 +348,29 @@ class Sc2WorldModel(common.Module):
         obs['mini'] = tf.cast(tf.concat(pp_mini_feat, axis=-1), dtype=dtype)
 
         # unit preproc
-        pp_unit_features = []
-        pp_unit_features.append(tf.cast(obs['units'][..., 0:1], dtype=tf.float32))                      # unit ids
-        pp_unit_features.append(tf.one_hot(obs['units'][..., 1] - 1, 4, dtype=tf.float32))              # alliance: self = 1, ally = 2, neutral, enemy, -1 so its 0 indexed
-        pp_unit_features.append(tf.cast(obs['units'][..., 2:5], dtype=tf.float32) / 255.0)              # health / shield / energy are all in scale 0-255
-        pp_unit_features.append(tf.cast(obs['units'][..., 5:6], dtype=tf.float32) / float(self.config.screen_size) - 0.5)   # x pos
-        pp_unit_features.append(tf.cast(obs['units'][..., 6:7], dtype=tf.float32) / float(self.config.screen_size) - 0.5)   # y pos
-        pp_unit_features.append(tf.cast(obs['units'][..., 7:8], dtype=tf.float32) / 5.0 - 0.5)          # radius: biggest units (command centers) have radius of 5
-        pp_unit_features.append(tf.cast(obs['units'][..., 8:12], dtype=tf.float32))                     # is_selected / is_blip / build_progress / is_powered
-        pp_unit_features.append(tf.cast(obs['units'][..., 12:13], dtype=tf.float32) / 1800.0 - 0.5)     # mineral count
-        pp_unit_features.append(tf.cast(obs['units'][..., 13:14], dtype=tf.float32) / 2250.0 - 0.5)     # vespene count
-        pp_unit_features.append(tf.cast(obs['units'][..., 14:15], dtype=tf.float32) / 8.0 - 0.5)        # cargo taken
-        pp_unit_features.append(tf.cast(obs['units'][..., 15:16], dtype=tf.float32) / 8.0 - 0.5)        # cargo max
-        pp_unit_features.append(tf.cast(obs['units'][..., 16:19], dtype=tf.float32))                    # is_flying / is_burrowed / is_in_cargo
-        pp_unit_features.append(tf.one_hot(obs['units'][..., 19] - 1, 4, dtype=tf.float32))             # cloak: Cloaked = 1, CloakedDetected = 2, NotCloaked = 3, Unknown = 4, -1 so its 0 indexed
-        pp_unit_features.append(tf.cast(obs['units'][..., 20:21], dtype=tf.float32))                    # is_hallucination
-        pp_unit_features.append(tf.cast(obs['units'][..., 21:22], dtype=tf.float32) / 3.0 - 0.5)        # attack upgrade
-        pp_unit_features.append(tf.cast(obs['units'][..., 22:23], dtype=tf.float32) / 3.0 - 0.5)        # armour upgrade
-        pp_unit_features.append(tf.cast(obs['units'][..., 23:24], dtype=tf.float32) / 3.0 - 0.5)        # shield upgrade
-        pp_unit_features.append(tf.cast(obs['units'][..., 24:65], dtype=tf.float32))                    # boolean buffs list
-        obs['units'] = tf.cast(tf.concat(pp_unit_features, axis=-1), dtype=dtype)
+        obs['unit_id'] = tf.cast(obs['units'][..., 0:1], dtype=tf.int32)                      # unit ids
+        obs['unit_alliance'] = tf.one_hot(obs['units'][..., 1] - 1, 4, dtype=dtype)              # alliance: self = 1, ally = 2, neutral, enemy, -1 so its 0 indexed
+        obs['unit_cloaked'] = tf.one_hot(obs['units'][..., 19] - 1, 4, dtype=dtype)  # cloak: Cloaked = 1, CloakedDetected = 2, NotCloaked = 3, Unknown = 4, -1 so its 0 indexed
+        obs['unit_continuous'] = tf.concat([
+            tf.cast(obs['units'][..., 2:5], dtype=dtype) / 255.0,              # health / shield / energy are all in scale 0-255
+            tf.cast(obs['units'][..., 5:6], dtype=dtype) / float(self.config.screen_size) - 0.5,  # x pos
+            tf.cast(obs['units'][..., 6:7], dtype=dtype) / float(self.config.screen_size) - 0.5,  # y pos
+            tf.cast(obs['units'][..., 7:8], dtype=dtype) / 5.0 - 0.5,  # radius: biggest units (command centers) have radius of 5
+            tf.cast(obs['units'][..., 12:13], dtype=dtype) / 1800.0 - 0.5,   # mineral count
+            tf.cast(obs['units'][..., 13:14], dtype=dtype) / 2250.0 - 0.5,  # vespene count
+            tf.cast(obs['units'][..., 14:15], dtype=dtype) / 8.0 - 0.5,  # cargo taken
+            tf.cast(obs['units'][..., 15:16], dtype=dtype) / 8.0 - 0.5,  # cargo max
+            tf.cast(obs['units'][..., 21:22], dtype=dtype) / 3.0 - 0.5,  # attack upgrade
+            tf.cast(obs['units'][..., 22:23], dtype=dtype) / 3.0 - 0.5,  # armour upgrade
+            tf.cast(obs['units'][..., 23:24], dtype=dtype) / 3.0 - 0.5  # shield upgrade
+            ], axis=-1)
+        obs['unit_binary'] = tf.concat([
+            tf.cast(obs['units'][..., 8:12], dtype=dtype),  # is_selected / is_blip / build_progress / is_powered
+            tf.cast(obs['units'][..., 16:19], dtype=dtype),  # is_flying / is_burrowed / is_in_cargo
+            tf.cast(obs['units'][..., 20:21], dtype=dtype),  # is_hallucination
+            tf.cast(obs['units'][..., 24:65], dtype=dtype)  # boolean buffs list
+        ])
+        del obs['units']
 
         # player preproc
         pp_player_features = []
