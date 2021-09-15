@@ -7,17 +7,35 @@ from tensorflow_probability import distributions as tfd
 
 # modification of chamfer distance to calculate smallest log_prob between a set distribution and another set
 # log_prob instead of huber loss as a distance metric
-def prob_chamfer_distance(set_dist, set_real, sizes):
-    batch_shape = tf.shape(set_real)[:-2]
-    batch_total = tf.reduce_prod(batch_shape)
-    element_total = tf.shape(set_real)[-2]
+def prob_chamfer_distance(id_dist, ids,
+                          alliance_dist, alliance,
+                          cloaked_dist, cloaked,
+                          continuous_dist, continuous,
+                          binary_dist, binary,
+                          sizes):
+
+    element_total = tf.shape(ids)[-2]
 
     # compare each element with every other element
     probs = []
     splits = tf.ones(element_total, dtype=tf.int32)
-    units = tf.split(set_real, splits, axis=-2)
-    for unit in units:
-        probs.append(set_dist.log_prob(unit))
+
+    # definitely not ideal to operate row by row, but it takes a boatload of memory to allocate the full [batch, set_size, set_size, features] array all at once
+    id_row = tf.split(ids, splits, axis=-2)
+    alliance_row = tf.split(alliance, splits, axis=-2)
+    cloaked_row = tf.split(cloaked, splits, axis=-2)
+    continuous_row = tf.split(continuous, splits, axis=-2)
+    binary_row = tf.split(binary, splits, axis=-2)
+
+    for i in range(element_total):
+        id_prob = id_dist.log_prob(id_row[i])
+        alliance_prob = alliance_dist.log_prob(alliance_row[i])
+        cloaked_prob = cloaked_dist.log_prob(cloaked_row[i])
+        continuous_prob = continuous_dist.log_prob(continuous_row[i])
+        binary_prob = binary_dist.log_prob(binary_row[i])
+
+        probs.append(id_prob + alliance_prob + cloaked_prob + continuous_prob + binary_prob)
+
     log_probs = tf.stack(probs, axis=-2)
 
     # flatten our batch dimensions so we just have [batch, elements, features]
@@ -40,8 +58,9 @@ def prob_chamfer_distance(set_dist, set_real, sizes):
     setwise_distance = (tf.reduce_mean(input_tensor=minimum_square_distance_a_to_b, axis=-1) +
                         tf.reduce_mean(input_tensor=minimum_square_distance_b_to_a, axis=-1))
 
-    out_shape = tf.shape(set_real)[:-2]
+    out_shape = tf.shape(ids)[:-2]
     batch_shaped = tf.reshape(setwise_distance, shape=out_shape)
+
     return batch_shaped
 
 

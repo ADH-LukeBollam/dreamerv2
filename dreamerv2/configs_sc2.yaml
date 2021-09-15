@@ -44,7 +44,7 @@ defaults:
              unit_embed_dim: 16, unit_pp_dim: 64, unit_num_layers: 2, unit_trans_dim: 128, unit_trans_heads: 2,
   }
   decoder: {depth: 48, act: elu, kernels: [5, 5, 6, 6]}
-  unit_decoder: {num_layers: 2, trans_dim: 128, trans_heads: 2, unit_features: 70}
+  unit_decoder: {num_layers: 2, trans_dim: 128, trans_heads: 2}
   avl_action_head: {layers: 4, units: 400, act: elu, dist: binary}
   player_head: {layers: 4, units: 400, act: elu, dist: binary}
   reward_head: {layers: 4, units: 400, act: elu, dist: mse}

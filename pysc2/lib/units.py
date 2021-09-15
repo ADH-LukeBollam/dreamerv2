@@ -325,10 +325,10 @@ def get_unit_embed_lookup():
     unbuildable = 7
     xelnagatower = 8
 
-    embed_index = 9
-
     # add a 'no unit' so that we have something to use in our embedding layer when its a padded value
-    lookup[0] = 0
+    lookup[0] = none
+
+    embed_index = 9
 
     for unit_id in list(map(int, Neutral)):
         attr = Neutral(unit_id).name

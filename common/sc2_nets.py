@@ -5,8 +5,10 @@ from tensorflow_probability import distributions as tfd
 import tensorflow_probability as tfp
 from tensorflow.keras.mixed_precision import experimental as prec
 import common
+from models.set_transformer import TransformerLayer
 from models.unit_encoder import UnitEncoder
 from pysc2.lib.features import Visibility, Effects
+from pysc2.lib.units import get_unit_embed_lookup
 
 
 class Sc2RSSM(common.Module):
@@ -159,8 +161,11 @@ class Sc2Encoder(common.Module):
         self._screen_encoder = Sc2ConvEncoder('screen', screen_depth, act, screen_kernels)
         self._minimap_encoder = Sc2ConvEncoder('minimap', minimap_depth, act, minimap_kernels)
         self._player_encoder = Sc2MlpEncoder('player', act, player_widths)
-        self._unit_encoder = UnitEncoder(unit_embed_dim, unit_pp_dim, unit_num_layers, unit_trans_dim, unit_trans_heads)
+        self._unit_encoder = UnitEncoder(unit_pp_dim, unit_num_layers, unit_trans_dim, unit_trans_heads)
         self._mixing_encoder = Sc2MlpEncoder('mixing', act, mixing_widths)
+
+        num_unit_types = len(set(get_unit_embed_lookup().values()))
+        self.unit_type_embedding = tf.keras.layers.Embedding(num_unit_types, unit_embed_dim)
 
     @tf.function
     def __call__(self, obs):
@@ -171,7 +176,9 @@ class Sc2Encoder(common.Module):
 
         minimap = self._minimap_encoder(obs['mini'])
         player = self._player_encoder(obs['player'])
-        units = self._unit_encoder(obs['units'])
+
+        unit_feats = self.get_unit_feats(obs['unit_id'], obs['unit_alliance'], obs['unit_cloaked'], obs['unit_continuous'], obs['unit_binary'])
+        units = self._unit_encoder(unit_feats)
 
         state_embed = tf.concat([avl_actions, screen, minimap, player, units], -1)
         mixed = self._mixing_encoder(state_embed)
@@ -179,8 +186,13 @@ class Sc2Encoder(common.Module):
         return mixed
 
     @tf.function
-    def embed_unit_type(self, unit_feats):
-        return self._unit_encoder.embed_unit_type(unit_feats)
+    def get_unit_feats(self, unit_ids_onehot, unit_alliance, unit_cloaked, unit_continuous, unit_binary):
+        unit_ids = tf.argmax(unit_ids_onehot, axis=-1)
+        embedded = self.unit_type_embedding(unit_ids)
+
+        unit_attributes = tf.concat([unit_alliance, unit_cloaked, unit_continuous, unit_binary], axis=-1)
+
+        return tf.concat([embedded, unit_attributes], axis=-1)
 
 
 class Sc2MlpEncoder(common.Module):
@@ -242,6 +254,49 @@ class Sc2ScreenDecoder(common.Module):
         outs['screen_buildable'] = self.get('screen_buildable_out', Sc2DistLayer, (1,), 'binary', dist_shape=self._screen_shape + (1,))(processed)
         outs['screen_pathable'] = self.get('screen_pathable_out', Sc2DistLayer, (1,), 'binary', dist_shape=self._screen_shape + (1,))(processed)
         outs['screen_effects'] = self.get('screen_effects_out', Sc2DistLayer, (len(Effects),), 'binary', dist_shape=self._screen_shape + (len(Effects),))(processed)
+
+        return outs
+
+
+class UnitDecoder(tf.keras.layers.Layer):
+    def __init__(self, num_layers, trans_dim, trans_heads):
+        super(UnitDecoder, self).__init__()
+        # process initial set to transformer dimension
+        self.embedding = tf.keras.layers.Conv1D(trans_dim, 1, kernel_initializer='glorot_uniform', use_bias=True,
+                                                bias_initializer=tf.constant_initializer(0.1))\
+
+        self.num_layers = num_layers
+        self.trans_dim = trans_dim
+        self.transformer = [TransformerLayer(trans_dim, trans_heads) for _ in range(num_layers)]
+        self.num_unit_types = len(set(get_unit_embed_lookup().values()))
+
+    def call(self, initial_set, encoding, sizes):
+        # flatten our batch + timestep dimensions together
+        x = tf.reshape(initial_set, (-1,) + tuple(initial_set.shape[-2:]))
+        x_encoding = tf.reshape(encoding, (-1, 1) + tuple(encoding.shape[-1:]))
+
+        set_size = tf.shape(x)[1]     # batch, set, features
+
+        # concat the encoding vector onto each initial set element
+        encoded_shaped = tf.tile(x_encoding, [1, set_size, 1])
+        conditioned_initial_set = tf.concat([x, encoded_shaped], 2)
+
+        mask = tf.reshape(tf.cast(tf.math.logical_not(tf.sequence_mask(sizes, set_size)), tf.float32), [-1, 1, 1, set_size])
+
+        x = self.embedding(conditioned_initial_set)
+
+        for i in range(self.num_layers):
+            x = self.transformer[i](x, x, mask)
+
+        processed = tf.reshape(x, tf.concat([tf.shape(initial_set)[:-1], (self.trans_dim,)], 0))
+
+        outs = {}
+
+        outs['unit_id'] = self.get('unit_id_out', Sc2DistLayer, (self.num_unit_types,), 'onehot_batch')(processed)
+        outs['unit_alliance'] = self.get('unit_alliance_out', Sc2DistLayer, (4,), 'onehot_batch')(processed)
+        outs['unit_cloaked'] = self.get('unit_cloaked_out', Sc2DistLayer, (4,), 'onehot_batch')(processed)
+        outs['unit_continuous'] = self.get('unit_continuous_out', Sc2DistLayer, (13,), 'mse')(processed)
+        outs['unit_binary'] = self.get('unit_binary_out', Sc2DistLayer, (49,), 'binary')(processed)
 
         return outs
 

@@ -5,7 +5,6 @@ import elements
 import common
 import expl
 from models.set_prior import SetPrior
-from models.unit_encoder import UnitDecoder
 from pysc2.lib.features import Visibility, Effects, PlayerRelative
 from pysc2.lib.units import get_unit_embed_lookup
 from losses.prob_chamfer_distance import prob_chamfer_distance
@@ -167,11 +166,11 @@ class Sc2WorldModel(common.Module):
         self.action_input_order = self.get_action_input_order()
         self.encoder = common.Sc2Encoder(**config.encoder)
         self.heads['available_actions'] = common.MLP(actspace['action_id'].n, **config.avl_action_head)
-        self.heads['screen'] = Sc2ScreenDecoder(config.screen_size, **config.decoder)
+        self.heads['screen'] = common.Sc2ScreenDecoder(config.screen_size, **config.decoder)
         self.heads['mini'] = common.ConvDecoder((config.mini_size, config.mini_size, 13), **config.decoder)
         self.heads['player'] = common.MLP(6, **config.player_head)
         self.heads['unit_init_set'] = SetPrior(86)     # after embedding unit type to 16 features, units have 86 features each
-        self.heads['units'] = UnitDecoder(**config.unit_decoder)    #
+        self.heads['units'] = common.UnitDecoder(**config.unit_decoder)    #
         self.heads['reward'] = common.MLP([], **config.reward_head)
         if config.pred_discount:
             self.heads['discount'] = common.MLP([], **config.discount_head)
@@ -208,11 +207,11 @@ class Sc2WorldModel(common.Module):
             inp = feat if grad_head else tf.stop_gradient(feat)
             if name == 'unit_init_set':
                 # to train initial unit set for the unit decoder, sample points for every unit in the batch and minimise
-                unpadded_units = tf.where(tf.not_equal(data['units'][:, :, :, 0], 0))  # find indices where unit type not 0
+                unpadded_units = tf.where(tf.not_equal(data['unit_id'][..., 0], 1))  # find indices where unit type not 0
                 total_units = tf.shape(unpadded_units)[0]
 
                 # use our existing learned unit type embedding to convert the one-hot type and use that as label for training the prior
-                unit_feats = tf.stop_gradient(self.encoder.embed_unit_type(data['units']))  # dont train our embedding layer, we just want to sample from it
+                unit_feats = tf.stop_gradient(self.encoder.get_unit_feats(data['unit_id'], data['unit_alliance'], data['unit_cloaked'], data['unit_continuous'], data['unit_binary']))  # dont train our embedding layer, we just want to sample from it
                 unit_true = tf.gather_nd(unit_feats, unpadded_units)
 
                 dist = head(total_units)
@@ -220,19 +219,19 @@ class Sc2WorldModel(common.Module):
                 likes[name] = like
                 losses[name] = -like.mean()
             elif name == 'units':
-                # convert the unit type to a one-hot label
-                unit_types = tf.cast(data[name][:, :, :, 0], dtype=tf.int32)
-                unit_types_oh = tf.one_hot(unit_types, self.num_unit_types, dtype=prec.global_policy().compute_dtype)
-                unit_label = tf.concat([unit_types_oh, data[name][:, :, :, 1:]], axis=-1)
-
-                unpadded_units = tf.cast(tf.not_equal(data[name][:, :, :, 0], 0), dtype=tf.int32)   # find indices where unit type not 0
+                unpadded_units = tf.cast(tf.not_equal(data[name][..., 0], 0), dtype=tf.int32)   # find indices where unit type not 0
                 set_sizes = tf.reduce_sum(unpadded_units, axis=-1)
 
                 initial_set = tf.stop_gradient(self.heads['unit_init_set'].sample(data[name]))     # dont train the initial unit distribution when sampling a set
 
-                unit_probs = head(initial_set, inp, set_sizes)
+                unit_dists = head(initial_set, inp, set_sizes)
 
-                like = tf.cast(prob_chamfer_distance(unit_probs, unit_label, set_sizes), tf.float32)
+                like = tf.cast(prob_chamfer_distance(unit_dists['unit_id'], data['unit_id'],
+                                                     unit_dists['unit_alliance'], data['unit_alliance'],
+                                                     unit_dists['unit_cloaked'], data['unit_cloaked'],
+                                                     unit_dists['unit_continuous'], data['unit_continuous'],
+                                                     unit_dists['unit_binary'], data['unit_binary'],
+                                                     set_sizes), tf.float32)
                 likes[name] = like
                 losses[name] = -like.mean()
             elif name == 'screen':
@@ -348,11 +347,11 @@ class Sc2WorldModel(common.Module):
         obs['mini'] = tf.cast(tf.concat(pp_mini_feat, axis=-1), dtype=dtype)
 
         # unit preproc
-        obs['unit_id'] = tf.cast(obs['units'][..., 0:1], dtype=tf.int32)                      # unit ids
-        obs['unit_alliance'] = tf.one_hot(obs['units'][..., 1] - 1, 4, dtype=dtype)              # alliance: self = 1, ally = 2, neutral, enemy, -1 so its 0 indexed
-        obs['unit_cloaked'] = tf.one_hot(obs['units'][..., 19] - 1, 4, dtype=dtype)  # cloak: Cloaked = 1, CloakedDetected = 2, NotCloaked = 3, Unknown = 4, -1 so its 0 indexed
+        obs['unit_id'] = tf.one_hot(obs['units'][..., 0], len(set(get_unit_embed_lookup().values())), dtype=tf.int32)     # unit ids
+        obs['unit_alliance'] = tf.one_hot(obs['units'][..., 1] - 1, 4, dtype=dtype)                                     # alliance: self = 1, ally = 2, neutral, enemy, -1 so its 0 indexed
+        obs['unit_cloaked'] = tf.one_hot(obs['units'][..., 19] - 1, 4, dtype=dtype)                                     # cloak: Cloaked = 1, CloakedDetected = 2, NotCloaked = 3, Unknown = 4, -1 so its 0 indexed
         obs['unit_continuous'] = tf.concat([
-            tf.cast(obs['units'][..., 2:5], dtype=dtype) / 255.0,              # health / shield / energy are all in scale 0-255
+            tf.cast(obs['units'][..., 2:5], dtype=dtype) / 255.0 - 0.5,              # health / shield / energy are all in scale 0-255
             tf.cast(obs['units'][..., 5:6], dtype=dtype) / float(self.config.screen_size) - 0.5,  # x pos
             tf.cast(obs['units'][..., 6:7], dtype=dtype) / float(self.config.screen_size) - 0.5,  # y pos
             tf.cast(obs['units'][..., 7:8], dtype=dtype) / 5.0 - 0.5,  # radius: biggest units (command centers) have radius of 5
@@ -369,7 +368,7 @@ class Sc2WorldModel(common.Module):
             tf.cast(obs['units'][..., 16:19], dtype=dtype),  # is_flying / is_burrowed / is_in_cargo
             tf.cast(obs['units'][..., 20:21], dtype=dtype),  # is_hallucination
             tf.cast(obs['units'][..., 24:65], dtype=dtype)  # boolean buffs list
-        ])
+        ], axis=-1)
         del obs['units']
 
         # player preproc
