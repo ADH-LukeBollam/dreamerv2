@@ -8,44 +8,38 @@ from tensorflow_probability import distributions as tfd
 # modification of chamfer distance to calculate smallest log_prob between a set distribution and another set
 # log_prob instead of huber loss as a distance metric
 def prob_chamfer_distance(id_dist, ids,
-                          alliance_dist, alliance,
-                          cloaked_dist, cloaked,
-                          continuous_dist, continuous,
-                          binary_dist, binary,
+                          # alliance_dist, alliance,
+                          # cloaked_dist, cloaked,
+                          # continuous_dist, continuous,
+                          # binary_dist, binary,
                           sizes):
 
+    batch_shape = tf.shape(ids)[:-2]
+    batch_total = tf.reduce_prod(batch_shape)
     element_total = tf.shape(ids)[-2]
 
-    # compare each element with every other element
-    probs = []
-    splits = tf.ones(element_total, dtype=tf.int32)
-
-    # definitely not ideal to operate row by row, but it takes a boatload of memory to allocate the full [batch, set_size, set_size, features] array all at once
-    id_row = tf.split(ids, splits, axis=-2)
-    alliance_row = tf.split(alliance, splits, axis=-2)
-    cloaked_row = tf.split(cloaked, splits, axis=-2)
-    continuous_row = tf.split(continuous, splits, axis=-2)
-    binary_row = tf.split(binary, splits, axis=-2)
-
-    for i in range(element_total):
-        id_prob = id_dist.log_prob(id_row[i])
-        alliance_prob = alliance_dist.log_prob(alliance_row[i])
-        cloaked_prob = cloaked_dist.log_prob(cloaked_row[i])
-        continuous_prob = continuous_dist.log_prob(continuous_row[i])
-        binary_prob = binary_dist.log_prob(binary_row[i])
-
-        probs.append(id_prob + alliance_prob + cloaked_prob + continuous_prob + binary_prob)
-
-    log_probs = tf.stack(probs, axis=-2)
-
     # flatten our batch dimensions so we just have [batch, elements, features]
+    sizes_flat = tf.reshape(sizes, (-1))
+
+    ids_flat = tf.reshape(ids, (-1,) + tuple(ids.shape[-2:]))
+    # alliance_flat = tf.reshape(alliance, (-1,) + tuple(alliance.shape[-2:]))
+    # cloaked_flat = tf.reshape(cloaked, (-1,) + tuple(cloaked.shape[-2:]))
+    # continuous_flat = tf.reshape(continuous, (-1,) + tuple(continuous.shape[-2:]))
+    # binary_flat = tf.reshape(binary, (-1,) + tuple(binary.shape[-2:]))
+
+    # tile the elements so we can compare the log_prob of every element to every other element
+    transposed_elems = tf.expand_dims(tf.transpose(ids_flat, perm=[1, 0, 2]), axis=-2)
+    # repeated_elems = tf.repeat(transposed_elems, element_total, axis=-2)
+    pointwise_log_prob = id_dist.log_prob(transposed_elems)
+    log_probs = tf.transpose(pointwise_log_prob, (1, 2, 0))
+
+    # flatten our batch dimensions so we just have [batch, elements, elements]
     log_probs = tf.reshape(log_probs, (-1, element_total, element_total))
 
     # remove the padded values before finding the min distance, otherwise the model can abuse the padding to
     # achieve lower chamfer loss and not actually learn anything
     # slice off the known extras from our tensor, otherwise raggedTensor throws an error if the final ragged
     # tensor can be squeezed smaller than the initial size (ie. at least one row / column needs to be current size)
-    sizes_flat = tf.reshape(sizes, (-1,))
     largest_unpadded_dim = tf.reduce_max(sizes_flat)
     log_probs_trimmed = log_probs[:, :largest_unpadded_dim, :largest_unpadded_dim]
 
@@ -67,6 +61,7 @@ def prob_chamfer_distance(id_dist, ids,
 if __name__ == '__main__':
     # simple set to ensure math is checking out
     mean = tf.constant([[[0.5, 0.75], [0.1, 0.25], [0.35, 0.9]], [[0.4, 0.45], [0.5, 0.7], [0.8, 0.25]]], tf.float32)
+
     dist = tfd.Independent(tfd.Normal(mean, 1), 1)
 
     # slice off padding
@@ -74,7 +69,8 @@ if __name__ == '__main__':
     expected = (tf.reduce_mean(input_tensor=closest_prob, axis=-1) + tf.reduce_mean(input_tensor=closest_prob, axis=-1))
 
     # same set but with elements swapped, to make sure the minimum permutation is being found
-    inverted_mean = tf.constant([[[0.35, 0.9], [0.5, 0.75], [0.1, 0.25]], [[0.8, 0.25], [0.4, 0.45], [0.5, 0.7]]], tf.float32)
+    # inverted_mean = tf.constant([[[0.35, 0.9], [0.5, 0.75], [0.1, 0.25]], [[0.8, 0.25], [0.4, 0.45], [0.5, 0.7]]], tf.float32)
+    inverted_mean = tf.reverse(mean, axis=[1])
 
     actual = prob_chamfer_distance(dist, inverted_mean, [3, 3])
 
@@ -95,8 +91,11 @@ if __name__ == '__main__':
     eq = tf.assert_equal(actual, expected)
 
     # test a big ol set like what gets used in the sc environment
-    mean = tf.random.normal([10, 10, 200, 380])
+    mean = tf.random.normal([10, 10, 200, 190])
     sizes = tf.random.uniform([10, 10], 50, 150, dtype=tf.int32)
-    dist = tfd.Independent(tfd.Normal(mean, 1), 1)
+
+    mean_flat = tf.reshape(mean, (-1,) + tuple(mean.shape[-2:]))
+
+    dist = tfd.Independent(tfd.Normal(mean_flat, 1), 1)
     out = prob_chamfer_distance(dist, mean, sizes)
     pass
