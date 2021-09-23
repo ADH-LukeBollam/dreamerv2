@@ -10,6 +10,7 @@ from pysc2.lib.units import get_unit_embed_lookup
 from losses.prob_chamfer_distance import prob_chamfer_distance
 from sc2_nets import Sc2ScreenDecoder
 
+
 class Sc2Agent(common.Module):
     def __init__(self, config, logger, actspce, step, dataset, action_required_args):
         self.config = config
@@ -55,14 +56,14 @@ class Sc2Agent(common.Module):
 
         noise = {'train': self.config.expl_noise, 'eval': self.config.eval_noise}
         noise = noise[mode]
-        action_prob = common.sc2_action_noise(action_prob, noise)
+        action_prob = tf.nn.softmax(common.sc2_action_noise(action_prob, noise))
 
         available_action_types = tf.cast(available_actions, tf.float32)
         masked_actions = action_prob * available_action_types + available_action_types  # scale unavailable actions to 0, then available actions get a +1 bonus so that if everything is 0, they are still higher
         chosen_action_id = tf.argmax(masked_actions, axis=-1, output_type=tf.int32)
         chosen_action_oh = tf.one_hot(chosen_action_id, depth=tf.shape(action_prob)[-1])
 
-        feat_action = tf.concat([feat, chosen_action_oh], -1)
+        feat_action = tf.concat([feat, tf.cast(chosen_action_oh, feat.dtype)], -1)
         arg_policy_out = arg_actor(tf.stop_gradient(feat_action))
 
         action_set = {}
@@ -153,14 +154,7 @@ class Sc2WorldModel(common.Module):
         self.act_space = actspace
 
         # create a lookup to find which actions each arg is used for, because its a pain to do action-to-arg in TF when iterating by arg types
-        arg_space_sizes = {key: (value.n,) for (key, value) in actspace.items() if key != 'action_id'}
-        self.actions_using_arg = {}
-        for arg in arg_space_sizes:
-            acts = []
-            for act in (range(actspace['action_id'].n)):
-                if arg in act_required_args[act]:
-                    acts.append(act)
-            self.actions_using_arg[arg] = tf.constant(acts, dtype=tf.int32)
+        self.arg_keys = [key for (key, value) in actspace.items() if key != 'action_id']
 
         self.num_unit_types = len(get_unit_embed_lookup())
         self.action_input_order = self.get_action_input_order()
@@ -169,8 +163,8 @@ class Sc2WorldModel(common.Module):
         self.heads['screen'] = common.Sc2ScreenDecoder(config.screen_size, **config.decoder)
         self.heads['mini'] = common.ConvDecoder((config.mini_size, config.mini_size, 13), **config.decoder)
         self.heads['player'] = common.MLP(6, **config.player_head)
-        self.heads['unit_init_set'] = SetPrior(86)     # after embedding unit type to 16 features, units have 86 features each
-        self.heads['units'] = common.UnitDecoder(**config.unit_decoder)    #
+        self.heads['unit_init_set'] = SetPrior(86)  # after embedding unit type to 16 features, units have 86 features each
+        self.heads['units'] = common.UnitDecoder(**config.unit_decoder)  #
         self.heads['reward'] = common.MLP([], **config.reward_head)
         if config.pred_discount:
             self.heads['discount'] = common.MLP([], **config.discount_head)
@@ -181,7 +175,7 @@ class Sc2WorldModel(common.Module):
     def get_action_input_order(self):
         action_order = ['action_id']
         args = {k: v for (k, v) in self.act_space.items() if 'arg' in k}
-        args = {k: v for k, v in sorted(args.items(), key=lambda x: float(x[0].split('_')[1]) + float(x[0].split('_')[2])*0.1)}   # sort by arg type, then arg axis
+        args = {k: v for k, v in sorted(args.items(), key=lambda x: float(x[0].split('_')[1]) + float(x[0].split('_')[2]) * 0.1)}  # sort by arg type, then arg axis
         action_order += [a for a in args.keys()]
         return action_order
 
@@ -219,18 +213,18 @@ class Sc2WorldModel(common.Module):
                 likes[name] = like
                 losses[name] = -like.mean()
             elif name == 'units':
-                unpadded_units = tf.cast(tf.not_equal(data[name][..., 0], 0), dtype=tf.int32)   # find indices where unit type not 0
+                unpadded_units = tf.cast(tf.not_equal(data['unit_id'][..., 0], 1), dtype=tf.int32)  # find indices where unit type not 0
                 set_sizes = tf.reduce_sum(unpadded_units, axis=-1)
 
-                initial_set = tf.stop_gradient(self.heads['unit_init_set'].sample(data[name]))     # dont train the initial unit distribution when sampling a set
+                initial_set = tf.stop_gradient(self.heads['unit_init_set'].sample(data['unit_id']))  # dont train the initial unit distribution when sampling a set
 
                 unit_dists = head(initial_set, inp, set_sizes)
 
-                like = tf.cast(prob_chamfer_distance(unit_dists['unit_id'], data['unit_id'],
-                                                     unit_dists['unit_alliance'], data['unit_alliance'],
-                                                     unit_dists['unit_cloaked'], data['unit_cloaked'],
-                                                     unit_dists['unit_continuous'], data['unit_continuous'],
-                                                     unit_dists['unit_binary'], data['unit_binary'],
+                like = tf.cast(prob_chamfer_distance(unit_dists['unit_id'], tf.cast(data['unit_id'], tf.int32),
+                                                     unit_dists['unit_alliance'], tf.cast(data['unit_alliance'], tf.int32),
+                                                     unit_dists['unit_cloaked'], tf.cast(data['unit_cloaked'], tf.int32),
+                                                     unit_dists['unit_continuous'], tf.cast(data['unit_continuous'], tf.float32),
+                                                     unit_dists['unit_binary'], tf.cast(data['unit_binary'], tf.int32),
                                                      set_sizes), tf.float32)
                 likes[name] = like
                 losses[name] = -like.mean()
@@ -260,62 +254,65 @@ class Sc2WorldModel(common.Module):
         start = {k: flatten(v) for k, v in start.items()}
 
         def step(prev, _):
-            state, _, _, _ = prev
+            state, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _ = prev
             feat = self.rssm.get_feat(state)
             norm_policy, onehot_policy = action_policy(tf.stop_gradient(feat))
-            action_prob = norm_policy.sample()
+            action_prob = tf.nn.softmax(norm_policy.sample())
 
-            # only allow imagined available actions
+            # only take imagined available actions
             available_action_types = tf.cast(tf.stop_gradient(self.heads['available_actions'](feat).mode()), tf.float32)  # dont train the world model while imagining
             masked_actions = action_prob * available_action_types + available_action_types  # scale unavailable actions to 0, then available actions get a +1 bonus so that if everything is 0, they are still higher
             chosen_action_id = tf.argmax(masked_actions, axis=-1, output_type=tf.int32)
             chosen_action_oh = tf.one_hot(chosen_action_id, depth=tf.shape(action_prob)[-1])
 
-            feat_action = tf.concat([feat, chosen_action_oh], -1)
-            arg_policy_out = arg_policy(tf.stop_gradient(feat_action))    # dont train action policy while updating arg policy
+            feat_action = tf.concat([feat, tf.cast(chosen_action_oh, feat.dtype)], -1)
+            arg_policy_out = arg_policy(tf.stop_gradient(feat_action))  # dont train action policy while updating arg policy
 
-            arg_dict = {}
-            action_set = {}
-            for arg_key in arg_policy_out:
+            args = [arg_policy_out['arg_0_0'].sample(),
+                    arg_policy_out['arg_0_1'].sample(),
+                    arg_policy_out['arg_1_0'].sample(),
+                    arg_policy_out['arg_1_1'].sample(),
+                    arg_policy_out['arg_2_0'].sample(),
+                    arg_policy_out['arg_2_1'].sample(),
+                    arg_policy_out['arg_3_0'].sample(),
+                    arg_policy_out['arg_4_0'].sample(),
+                    arg_policy_out['arg_5_0'].sample(),
+                    arg_policy_out['arg_6_0'].sample(),
+                    arg_policy_out['arg_7_0'].sample(),
+                    arg_policy_out['arg_9_0'].sample(),
+                    arg_policy_out['arg_10_0'].sample()]
 
-                # tile our chosen actions and check if this arg is required for each action
-                actions_needing_arg = self.actions_using_arg[arg_key]
-                actions_tiled = tf.tile(tf.expand_dims(chosen_action_id, -1), [1, tf.size(actions_needing_arg)])
-                needed = tf.cast(tf.greater(tf.math.count_nonzero(tf.equal(actions_tiled, actions_needing_arg), axis=-1), 0), tf.float32)
-
-                # get our arg vals and add a padding row
-                arg_vals = arg_policy_out[arg_key].sample()
-                arg_vals_padded = tf.concat([tf.zeros((1, tf.shape(arg_vals)[1]), tf.float32), arg_vals], axis=0)
-
-                # only gather used arguments, get the padding row for everything else
-                all_indices = tf.range(0, tf.shape(arg_vals)[0], dtype=tf.float32) + 1    # bump all indexes by 1, and use 0 for a padding row
-                gather_indices = tf.cast(all_indices * needed, tf.int32)
-                padded_args = tf.gather(arg_vals_padded, gather_indices, axis=0)
-
-                arg_dict[arg_key] = padded_args
-                action_set[arg_key] = padded_args
-            action_set['action_id'] = chosen_action_oh
-
-            action_vec = self.action_preprocess(action_set)
+            action_vec = self.action_preprocess(chosen_action_oh, *args)
 
             succ = self.rssm.img_step(state, action_vec)
-            return succ, feat, chosen_action_oh, arg_dict
+
+            return succ, feat, chosen_action_oh, arg_policy_out, *args
 
         feat = 0 * self.rssm.get_feat(start)
 
-        norm_policy, onehot_policy = action_policy(feat)
-        action = norm_policy.mode()
-        available_action_types = tf.cast(tf.stop_gradient(self.heads['available_actions'](feat).mode()), tf.float32)     # dont train avl action head while learning policy
-        masked_actions = action * available_action_types + available_action_types  # scale unavailable actions to 0, then available actions get a +1 bonus so that if everything is 0, they are still higher
-        chosen_action = tf.one_hot(tf.argmax(masked_actions, axis=-1), depth=tf.shape(action)[-1])
+        init_norm_policy, init_onehot_policy = action_policy(feat)
+        init_action = tf.nn.softmax(init_norm_policy.mode())
+        init_available_action_types = tf.cast(tf.stop_gradient(self.heads['available_actions'](feat).mode()), tf.float32)  # dont train avl action head while learning policy
+        init_masked_actions = init_action * init_available_action_types + init_available_action_types  # scale unavailable actions to 0, then available actions get a +1 bonus so that if everything is 0, they are still higher
+        init_chosen_action = tf.one_hot(tf.argmax(init_masked_actions, axis=-1), depth=tf.shape(init_action)[-1])
 
-        feat_action = tf.concat([feat, chosen_action], -1)
-        arg_dict = {}
-        arg_policy_out = arg_policy(feat_action)
-        for a in arg_policy_out:
-            arg_dict[a] = arg_policy_out[a].mode()
+        init_feat_action = tf.concat([feat, tf.cast(init_chosen_action, feat.dtype)], -1)
+        init_arg_policy_out = arg_policy(init_feat_action)
+        init_args = [init_arg_policy_out['arg_0_0'].mode(),
+                     init_arg_policy_out['arg_0_1'].mode(),
+                     init_arg_policy_out['arg_1_0'].mode(),
+                     init_arg_policy_out['arg_1_1'].mode(),
+                     init_arg_policy_out['arg_2_0'].mode(),
+                     init_arg_policy_out['arg_2_1'].mode(),
+                     init_arg_policy_out['arg_3_0'].mode(),
+                     init_arg_policy_out['arg_4_0'].mode(),
+                     init_arg_policy_out['arg_5_0'].mode(),
+                     init_arg_policy_out['arg_6_0'].mode(),
+                     init_arg_policy_out['arg_7_0'].mode(),
+                     init_arg_policy_out['arg_9_0'].mode(),
+                     init_arg_policy_out['arg_10_0'].mode()]
 
-        succs, feats, actions, args = common.static_scan(step, tf.range(horizon), (start, feat, action, arg_dict))
+        succs, feats, actions, args = common.static_scan(step, tf.range(horizon), (start, feat, init_action, *init_args))
 
         states = {k: tf.concat([start[k][None], v[:-1]], 0) for k, v in succs.items()}
         if 'discount' in self.heads:
@@ -331,40 +328,42 @@ class Sc2WorldModel(common.Module):
 
         # screen preproc
         obs['screen_visibility'] = tf.one_hot(obs['screen'][..., 0], len(Visibility), dtype=dtype)  # screen visibility
-        obs['screen_height'] = tf.cast(obs['screen'][..., 1:2], dtype=dtype) / 255.0 - 0.5      # screen height
-        obs['screen_creep'] = tf.cast(obs['screen'][..., 2:3], dtype=dtype)                  # creep / buildable / pathable
+        obs['screen_height'] = tf.cast(obs['screen'][..., 1:2], dtype=dtype) / 255.0 - 0.5  # screen height
+        obs['screen_creep'] = tf.cast(obs['screen'][..., 2:3], dtype=dtype)  # creep / buildable / pathable
         obs['screen_buildable'] = tf.cast(obs['screen'][..., 3:4], dtype=dtype)
         obs['screen_pathable'] = tf.cast(obs['screen'][..., 4:5], dtype=dtype)
-        obs['screen_effects'] = tf.one_hot(obs['screen'][..., 5], len(Effects), dtype=dtype)     # screen effects one-hot
+        obs['screen_effects'] = tf.one_hot(obs['screen'][..., 5], len(Effects), dtype=dtype)  # screen effects one-hot
         del obs['screen']
 
         # minimap preproc
         pp_mini_feat = []
-        pp_mini_feat.append(tf.one_hot(obs['mini'][..., 0], len(Visibility), dtype=tf.float32))      # minimap visibility
-        pp_mini_feat.append(tf.cast(obs['mini'][..., 1:2], dtype=tf.float32) / 255.0 - 0.5)          # minimap height
+        pp_mini_feat.append(tf.one_hot(obs['mini'][..., 0], len(Visibility), dtype=tf.float32))  # minimap visibility
+        pp_mini_feat.append(tf.cast(obs['mini'][..., 1:2], dtype=tf.float32) / 255.0 - 0.5)  # minimap height
         pp_mini_feat.append(tf.one_hot(obs['mini'][..., 2], len(PlayerRelative), dtype=tf.float32))  # minimap player relative unit alliance
-        pp_mini_feat.append(tf.cast(obs['mini'][..., 3:7], dtype=tf.float32) * 1.0)                  # creep / buildable / pathable / camera
+        pp_mini_feat.append(tf.cast(obs['mini'][..., 3:7], dtype=tf.float32) * 1.0)  # creep / buildable / pathable / camera
         obs['mini'] = tf.cast(tf.concat(pp_mini_feat, axis=-1), dtype=dtype)
 
         # unit preproc
-        obs['unit_id'] = tf.one_hot(obs['units'][..., 0], len(set(get_unit_embed_lookup().values())), dtype=tf.int32)     # unit ids
-        obs['unit_alliance'] = tf.one_hot(obs['units'][..., 1] - 1, 4, dtype=dtype)                                     # alliance: self = 1, ally = 2, neutral, enemy, -1 so its 0 indexed
-        obs['unit_cloaked'] = tf.one_hot(obs['units'][..., 19] - 1, 4, dtype=dtype)                                     # cloak: Cloaked = 1, CloakedDetected = 2, NotCloaked = 3, Unknown = 4, -1 so its 0 indexed
+        obs['unit_id'] = tf.one_hot(obs['units'][..., 0], len(set(get_unit_embed_lookup().values())), dtype=tf.int32)  # unit ids
+        obs['unit_alliance'] = tf.one_hot(obs['units'][..., 1] - 1, 4, dtype=dtype)  # alliance: self = 1, ally = 2, neutral, enemy, -1 so its 0 indexed
+        obs['unit_cloaked'] = tf.one_hot(obs['units'][..., 19] - 1, 4, dtype=dtype)  # cloak: Cloaked = 1, CloakedDetected = 2, NotCloaked = 3, Unknown = 4, -1 so its 0 indexed
         obs['unit_continuous'] = tf.concat([
-            tf.cast(obs['units'][..., 2:5], dtype=dtype) / 255.0 - 0.5,              # health / shield / energy are all in scale 0-255
+            tf.cast(obs['units'][..., 2:5], dtype=dtype) / 255.0 - 0.5,  # health / shield / energy are all in scale 0-255
             tf.cast(obs['units'][..., 5:6], dtype=dtype) / float(self.config.screen_size) - 0.5,  # x pos
             tf.cast(obs['units'][..., 6:7], dtype=dtype) / float(self.config.screen_size) - 0.5,  # y pos
             tf.cast(obs['units'][..., 7:8], dtype=dtype) / 5.0 - 0.5,  # radius: biggest units (command centers) have radius of 5
-            tf.cast(obs['units'][..., 12:13], dtype=dtype) / 1800.0 - 0.5,   # mineral count
+            tf.cast(obs['units'][..., 10:11], dtype=dtype),  # build_progress
+            tf.cast(obs['units'][..., 12:13], dtype=dtype) / 1800.0 - 0.5,  # mineral count
             tf.cast(obs['units'][..., 13:14], dtype=dtype) / 2250.0 - 0.5,  # vespene count
             tf.cast(obs['units'][..., 14:15], dtype=dtype) / 8.0 - 0.5,  # cargo taken
             tf.cast(obs['units'][..., 15:16], dtype=dtype) / 8.0 - 0.5,  # cargo max
             tf.cast(obs['units'][..., 21:22], dtype=dtype) / 3.0 - 0.5,  # attack upgrade
             tf.cast(obs['units'][..., 22:23], dtype=dtype) / 3.0 - 0.5,  # armour upgrade
             tf.cast(obs['units'][..., 23:24], dtype=dtype) / 3.0 - 0.5  # shield upgrade
-            ], axis=-1)
+        ], axis=-1)
         obs['unit_binary'] = tf.concat([
-            tf.cast(obs['units'][..., 8:12], dtype=dtype),  # is_selected / is_blip / build_progress / is_powered
+            tf.cast(obs['units'][..., 8:10], dtype=dtype),  # is_selected / is_blip
+            tf.cast(obs['units'][..., 11:12], dtype=dtype),  # is_powered
             tf.cast(obs['units'][..., 16:19], dtype=dtype),  # is_flying / is_burrowed / is_in_cargo
             tf.cast(obs['units'][..., 20:21], dtype=dtype),  # is_hallucination
             tf.cast(obs['units'][..., 24:65], dtype=dtype)  # boolean buffs list
@@ -374,27 +373,29 @@ class Sc2WorldModel(common.Module):
         # player preproc
         pp_player_features = []
         obs['player'] = tf.cast(obs['player'], dtype=tf.float32)
-        pp_player_features.append(tf.sqrt(obs['player'][..., 0:1]) / 50)    # player minerals
-        pp_player_features.append(tf.sqrt(obs['player'][..., 1:2]) / 50)    # player gas
-        pp_player_features.append(obs['player'][..., 2:3] / 200)            # supply used
-        pp_player_features.append(obs['player'][..., 3:4] / 200)            # supply max
-        pp_player_features.append(obs['player'][..., 4:5] / 10)             # warp gates
-        pp_player_features.append(obs['player'][..., 5:6] / 20)             # larva count
+        pp_player_features.append(tf.sqrt(obs['player'][..., 0:1]) / 50)  # player minerals
+        pp_player_features.append(tf.sqrt(obs['player'][..., 1:2]) / 50)  # player gas
+        pp_player_features.append(obs['player'][..., 2:3] / 200)  # supply used
+        pp_player_features.append(obs['player'][..., 3:4] / 200)  # supply max
+        pp_player_features.append(obs['player'][..., 4:5] / 10)  # warp gates
+        pp_player_features.append(obs['player'][..., 5:6] / 20)  # larva count
         obs['player'] = tf.cast(tf.concat(pp_player_features, axis=-1), dtype=dtype)
 
         obs['available_actions'] = tf.cast(obs['available_actions'], dtype=dtype)
 
         obs['reward'] = getattr(tf, self.config.clip_rewards)(obs['reward'])
         if 'discount' in obs:
-          obs['discount'] *= self.config.discount
+            obs['discount'] *= self.config.discount
         return obs
 
     @tf.function
-    def action_preprocess(self, data):
-        action_input = []
-        for act in self.action_input_order:
-            action_input.append(data[act])
-        return tf.concat(action_input, axis=-1)
+    def action_preprocess(self, action, arg_0_0, arg_0_1, arg_1_0, arg_1_1,
+                          arg_2_0, arg_2_1, arg_3_0, arg_4_0,
+                          arg_5_0, arg_6_0, arg_7_0, arg_9_0, arg_10_0):
+
+        return tf.concat([action, arg_0_0, arg_0_1, arg_1_0, arg_1_1,
+                          arg_2_0, arg_2_1, arg_3_0, arg_4_0,
+                          arg_5_0, arg_6_0, arg_7_0, arg_9_0, arg_10_0], axis=-1)
 
     @tf.function
     def video_pred(self, data):
@@ -499,7 +500,7 @@ class Sc2ActorCritic(common.Module):
         metrics = {}
         chosen_action_id = tf.argmax(action, axis=-1, output_type=tf.int32)
 
-        feat_action = tf.concat([feat, action], -1)
+        feat_action = tf.concat([feat, tf.cast(action, feat.dtype)], -1)
         policy = self.arg_actor(tf.stop_gradient(feat_action))
 
         arg_head_losses = tf.TensorArray(tf.float32, size=0, dynamic_size=True)

@@ -249,7 +249,7 @@ class Sc2ScreenDecoder(common.Module):
         outs = {}
 
         outs['screen_visibility'] = self.get('screen_visibility_out', Sc2DistLayer, (len(Visibility),), 'onehot_batch', dist_shape=self._screen_shape + (len(Visibility),))(processed)
-        outs['screen_height'] = self.get('screen_height_out', Sc2DistLayer, (1,), 'mse', dist_shape=self._screen_shape + (1,))(processed)
+        outs['screen_height'] = self.get('screen_height_out', Sc2DistLayer, (1,), 'normal', dist_shape=self._screen_shape + (1,))(processed)
         outs['screen_creep'] = self.get('screen_creep_out', Sc2DistLayer, (1,), 'binary', dist_shape=self._screen_shape + (1,))(processed)
         outs['screen_buildable'] = self.get('screen_buildable_out', Sc2DistLayer, (1,), 'binary', dist_shape=self._screen_shape + (1,))(processed)
         outs['screen_pathable'] = self.get('screen_pathable_out', Sc2DistLayer, (1,), 'binary', dist_shape=self._screen_shape + (1,))(processed)
@@ -258,7 +258,7 @@ class Sc2ScreenDecoder(common.Module):
         return outs
 
 
-class UnitDecoder(tf.keras.layers.Layer):
+class UnitDecoder(common.Module):
     def __init__(self, num_layers, trans_dim, trans_heads):
         super(UnitDecoder, self).__init__()
         # process initial set to transformer dimension
@@ -270,7 +270,7 @@ class UnitDecoder(tf.keras.layers.Layer):
         self.transformer = [TransformerLayer(trans_dim, trans_heads) for _ in range(num_layers)]
         self.num_unit_types = len(set(get_unit_embed_lookup().values()))
 
-    def call(self, initial_set, encoding, sizes):
+    def __call__(self, initial_set, encoding, sizes):
         # flatten our batch + timestep dimensions together
         x = tf.reshape(initial_set, (-1,) + tuple(initial_set.shape[-2:]))
         x_encoding = tf.reshape(encoding, (-1, 1) + tuple(encoding.shape[-1:]))
@@ -295,8 +295,8 @@ class UnitDecoder(tf.keras.layers.Layer):
         outs['unit_id'] = self.get('unit_id_out', Sc2DistLayer, (self.num_unit_types,), 'onehot_batch')(processed)
         outs['unit_alliance'] = self.get('unit_alliance_out', Sc2DistLayer, (4,), 'onehot_batch')(processed)
         outs['unit_cloaked'] = self.get('unit_cloaked_out', Sc2DistLayer, (4,), 'onehot_batch')(processed)
-        outs['unit_continuous'] = self.get('unit_continuous_out', Sc2DistLayer, (13,), 'mse')(processed)
-        outs['unit_binary'] = self.get('unit_binary_out', Sc2DistLayer, (49,), 'binary')(processed)
+        outs['unit_continuous'] = self.get('unit_continuous_out', Sc2DistLayer, (14,), 'normal')(processed)
+        outs['unit_binary'] = self.get('unit_binary_out', Sc2DistLayer, (48,), 'binary')(processed)
 
         return outs
 

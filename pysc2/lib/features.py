@@ -1357,7 +1357,7 @@ class Features(object):
                 u.shield,
                 u.energy,
                 u.cargo_space_taken,
-                int(u.build_progress * 100),  # discretize
+                u.build_progress,  # discretize
 
                 # Resume API order
                 int(u.health / u.health_max * 255) if u.health_max > 0 else 0,

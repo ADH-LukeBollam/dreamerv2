@@ -124,8 +124,8 @@ def scaled_dot_product_attention(q, k, v, mask):
 
     # softmax is normalized on the last axis (seq_len_k) so that the scores
     # add up to 1.
-    attention_weights = tf.cast(tf.nn.softmax(scaled_attention_logits, axis=-1), v.dtype)  # (..., seq_len_q, seq_len_k)
+    attention_weights = tf.nn.softmax(scaled_attention_logits, axis=-1) # (..., seq_len_q, seq_len_k)
 
-    output = tf.matmul(attention_weights, v)  # (..., seq_len_q, depth_v)
+    output = tf.cast(tf.matmul(attention_weights, tf.cast(v, tf.float32)), v.dtype)  # (..., seq_len_q, depth_v)
 
     return output, attention_weights

@@ -8,30 +8,35 @@ from tensorflow_probability import distributions as tfd
 # modification of chamfer distance to calculate smallest log_prob between a set distribution and another set
 # log_prob instead of huber loss as a distance metric
 def prob_chamfer_distance(id_dist, ids,
-                          # alliance_dist, alliance,
-                          # cloaked_dist, cloaked,
-                          # continuous_dist, continuous,
-                          # binary_dist, binary,
+                          alliance_dist, alliance,
+                          cloaked_dist, cloaked,
+                          continuous_dist, continuous,
+                          binary_dist, binary,
                           sizes):
 
-    batch_shape = tf.shape(ids)[:-2]
-    batch_total = tf.reduce_prod(batch_shape)
     element_total = tf.shape(ids)[-2]
 
-    # flatten our batch dimensions so we just have [batch, elements, features]
-    sizes_flat = tf.reshape(sizes, (-1))
+    # compare each element with every other element
+    probs = []
+    splits = tf.ones(element_total, dtype=tf.int32)
 
-    ids_flat = tf.reshape(ids, (-1,) + tuple(ids.shape[-2:]))
-    # alliance_flat = tf.reshape(alliance, (-1,) + tuple(alliance.shape[-2:]))
-    # cloaked_flat = tf.reshape(cloaked, (-1,) + tuple(cloaked.shape[-2:]))
-    # continuous_flat = tf.reshape(continuous, (-1,) + tuple(continuous.shape[-2:]))
-    # binary_flat = tf.reshape(binary, (-1,) + tuple(binary.shape[-2:]))
+    # definitely not ideal to operate row by row, but it takes a boatload of memory to allocate the full [batch, set_size, set_size, features] array all at once
+    id_row = tf.split(ids, splits, axis=-2)
+    alliance_row = tf.split(alliance, splits, axis=-2)
+    cloaked_row = tf.split(cloaked, splits, axis=-2)
+    continuous_row = tf.split(continuous, splits, axis=-2)
+    binary_row = tf.split(binary, splits, axis=-2)
 
-    # tile the elements so we can compare the log_prob of every element to every other element
-    transposed_elems = tf.expand_dims(tf.transpose(ids_flat, perm=[1, 0, 2]), axis=-2)
-    # repeated_elems = tf.repeat(transposed_elems, element_total, axis=-2)
-    pointwise_log_prob = id_dist.log_prob(transposed_elems)
-    log_probs = tf.transpose(pointwise_log_prob, (1, 2, 0))
+    for i in range(element_total):
+        id_prob = id_dist.log_prob(id_row[i])
+        alliance_prob = alliance_dist.log_prob(alliance_row[i])
+        cloaked_prob = cloaked_dist.log_prob(cloaked_row[i])
+        continuous_prob = continuous_dist.log_prob(continuous_row[i])
+        binary_prob = binary_dist.log_prob(binary_row[i])
+
+        probs.append(id_prob + alliance_prob + cloaked_prob + continuous_prob + binary_prob)
+
+    log_probs = tf.stack(probs, axis=-2)
 
     # flatten our batch dimensions so we just have [batch, elements, elements]
     log_probs = tf.reshape(log_probs, (-1, element_total, element_total))
@@ -40,6 +45,7 @@ def prob_chamfer_distance(id_dist, ids,
     # achieve lower chamfer loss and not actually learn anything
     # slice off the known extras from our tensor, otherwise raggedTensor throws an error if the final ragged
     # tensor can be squeezed smaller than the initial size (ie. at least one row / column needs to be current size)
+    sizes_flat = tf.reshape(sizes, (-1,))
     largest_unpadded_dim = tf.reduce_max(sizes_flat)
     log_probs_trimmed = log_probs[:, :largest_unpadded_dim, :largest_unpadded_dim]
 
@@ -94,8 +100,6 @@ if __name__ == '__main__':
     mean = tf.random.normal([10, 10, 200, 190])
     sizes = tf.random.uniform([10, 10], 50, 150, dtype=tf.int32)
 
-    mean_flat = tf.reshape(mean, (-1,) + tuple(mean.shape[-2:]))
-
-    dist = tfd.Independent(tfd.Normal(mean_flat, 1), 1)
+    dist = tfd.Independent(tfd.Normal(mean, 1), 1)
     out = prob_chamfer_distance(dist, mean, sizes)
     pass

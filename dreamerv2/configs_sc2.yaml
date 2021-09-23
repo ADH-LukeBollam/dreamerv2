@@ -16,7 +16,7 @@ defaults:
   replay_size: 2e6
   dataset: {batch: 3, length: 20, oversample_ends: True}
   precision: 16
-  jit: True
+  jit: False
   screen_size: 64
   mini_size: 64
 
@@ -89,8 +89,8 @@ sc2:
   mini_size: 64
   time_limit: 108000  # 30 minutes of game play.
   steps: 2e8
-  eval_every: 1e5
-  log_every: 1e5
+  eval_every: 1e3
+  log_every: 1e3
   prefill: 5000
   grayscale: True
   train_every: 16
