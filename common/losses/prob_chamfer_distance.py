@@ -12,22 +12,19 @@ def prob_chamfer_distance(id_dist, ids,
                           cloaked_dist, cloaked,
                           continuous_dist, continuous,
                           binary_dist, binary,
-                          sizes):
-
-    element_total = tf.shape(ids)[-2]
+                          sizes, max_size):
 
     # compare each element with every other element
     probs = []
-    splits = tf.ones(element_total, dtype=tf.int32)
 
     # definitely not ideal to operate row by row, but it takes a boatload of memory to allocate the full [batch, set_size, set_size, features] array all at once
-    id_row = tf.split(ids, splits, axis=-2)
-    alliance_row = tf.split(alliance, splits, axis=-2)
-    cloaked_row = tf.split(cloaked, splits, axis=-2)
-    continuous_row = tf.split(continuous, splits, axis=-2)
-    binary_row = tf.split(binary, splits, axis=-2)
+    id_row = tf.split(ids, max_size, axis=-2)
+    alliance_row = tf.split(alliance, max_size, axis=-2)
+    cloaked_row = tf.split(cloaked, max_size, axis=-2)
+    continuous_row = tf.split(continuous, max_size, axis=-2)
+    binary_row = tf.split(binary, max_size, axis=-2)
 
-    for i in range(element_total):
+    for i in range(max_size):
         id_prob = id_dist.log_prob(id_row[i])
         alliance_prob = alliance_dist.log_prob(alliance_row[i])
         cloaked_prob = cloaked_dist.log_prob(cloaked_row[i])
@@ -39,7 +36,7 @@ def prob_chamfer_distance(id_dist, ids,
     log_probs = tf.stack(probs, axis=-2)
 
     # flatten our batch dimensions so we just have [batch, elements, elements]
-    log_probs = tf.reshape(log_probs, (-1, element_total, element_total))
+    log_probs = tf.reshape(log_probs, (-1, max_size, max_size))
 
     # remove the padded values before finding the min distance, otherwise the model can abuse the padding to
     # achieve lower chamfer loss and not actually learn anything
@@ -78,7 +75,7 @@ if __name__ == '__main__':
     # inverted_mean = tf.constant([[[0.35, 0.9], [0.5, 0.75], [0.1, 0.25]], [[0.8, 0.25], [0.4, 0.45], [0.5, 0.7]]], tf.float32)
     inverted_mean = tf.reverse(mean, axis=[1])
 
-    actual = prob_chamfer_distance(dist, inverted_mean, [3, 3])
+    actual = prob_chamfer_distance(dist, inverted_mean, [3, 3], 3)
 
     eq = tf.assert_equal(actual, expected)
 
@@ -92,7 +89,7 @@ if __name__ == '__main__':
     # this set has two matching points on one side, with one match and one outlier on the other
     expected = closest_prob[0][0] + tf.reduce_mean([closest_prob[0][0], closest_prob[0][1]])
 
-    actual = prob_chamfer_distance(imb_dist, true, [2])
+    actual = prob_chamfer_distance(imb_dist, true, [2], 2)
 
     eq = tf.assert_equal(actual, expected)
 

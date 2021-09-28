@@ -249,7 +249,7 @@ class Sc2ScreenDecoder(common.Module):
         outs = {}
 
         outs['screen_visibility'] = self.get('screen_visibility_out', Sc2DistLayer, (len(Visibility),), 'onehot_batch', dist_shape=self._screen_shape + (len(Visibility),))(processed)
-        outs['screen_height'] = self.get('screen_height_out', Sc2DistLayer, (1,), 'normal', dist_shape=self._screen_shape + (1,))(processed)
+        outs['screen_height'] = self.get('screen_height_out', Sc2DistLayer, (1,), 'mse', dist_shape=self._screen_shape + (1,))(processed)
         outs['screen_creep'] = self.get('screen_creep_out', Sc2DistLayer, (1,), 'binary', dist_shape=self._screen_shape + (1,))(processed)
         outs['screen_buildable'] = self.get('screen_buildable_out', Sc2DistLayer, (1,), 'binary', dist_shape=self._screen_shape + (1,))(processed)
         outs['screen_pathable'] = self.get('screen_pathable_out', Sc2DistLayer, (1,), 'binary', dist_shape=self._screen_shape + (1,))(processed)
@@ -295,7 +295,7 @@ class UnitDecoder(common.Module):
         outs['unit_id'] = self.get('unit_id_out', Sc2DistLayer, (self.num_unit_types,), 'onehot_batch')(processed)
         outs['unit_alliance'] = self.get('unit_alliance_out', Sc2DistLayer, (4,), 'onehot_batch')(processed)
         outs['unit_cloaked'] = self.get('unit_cloaked_out', Sc2DistLayer, (4,), 'onehot_batch')(processed)
-        outs['unit_continuous'] = self.get('unit_continuous_out', Sc2DistLayer, (14,), 'normal')(processed)
+        outs['unit_continuous'] = self.get('unit_continuous_out', Sc2DistLayer, (14,), 'mse')(processed)
         outs['unit_binary'] = self.get('unit_binary_out', Sc2DistLayer, (48,), 'binary')(processed)
 
         return outs
@@ -388,7 +388,7 @@ class Sc2DistLayer(common.Module):
         out = tf.cast(out, tf.float32)
         if self._dist in ('normal', 'tanh_normal', 'trunc_normal', 'normal_onehot'):
             std = self.get('std', tfkl.Dense, np.prod(self._dist_shape))(inputs)
-            std = tf.reshape(std, tf.concat([tf.shape(inputs)[:-1], self._dist_shape], 0))
+            std = tf.reshape(std, tf.concat([tf.shape(inputs)[:-1], self._shape], 0))
             std = tf.cast(std, tf.float32)
         if self._dist == 'mse':
             dist = tfd.Normal(out, 1.0)

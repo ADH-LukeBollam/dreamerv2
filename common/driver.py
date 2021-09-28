@@ -1,4 +1,5 @@
 import numpy as np
+import tensorflow as tf
 
 
 class Driver:
@@ -31,6 +32,10 @@ class Driver:
     step, episode = 0, 0
 
     while step < steps or episode < episodes:
+
+      # tf.profiler.experimental.start(str('logs/sc/1'))
+      # with tf.profiler.experimental.Trace('train', step_num=step, _r=1):
+
       for i, done in enumerate(self._dones):
         if done:
           self._obs[i] = ob = self._envs[i].reset()
@@ -60,6 +65,8 @@ class Driver:
       self._dones = list(dones)
       episode += sum(dones)
       step += len(dones)
+
+      # tf.profiler.experimental.stop()
 
   def _convert(self, value):
     value = np.array(value)

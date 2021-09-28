@@ -76,7 +76,7 @@ should_video_eval = elements.Every(config.eval_every)
 
 def make_env(mode):
     suite, task = config.task.split('_', 1)
-    env = common.Sc2(task, config.screen_size, config.mini_size, 22, 0, False, False)
+    env = common.Sc2(task, config.screen_size, config.mini_size, config.max_units, 22, 0, False, False)
     env = common.OneHotAction(env)
     env = common.TimeLimit(env, config.time_limit)
     env = common.RewardObs(env)
@@ -131,12 +131,10 @@ else:
 
 def train_step(tran):
     if should_train(step):
-        # tf.profiler.experimental.start(str(logdir))
+
         for _ in range(config.train_steps):
-            # with tf.profiler.experimental.Trace('train', step_num=step, _r=1):
             _, mets = agnt.train(next(train_dataset))
             [metrics[key].append(value) for key, value in mets.items()]
-        # tf.profiler.experimental.stop()
     if should_log(step):
         for name, values in metrics.items():
             logger.scalar(name, np.array(values, np.float64).mean())

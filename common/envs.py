@@ -136,12 +136,13 @@ class Atari:
 
 
 class Sc2:
-    def __init__(self, map_name, screen_size, minimap_size, steps_per_action, steps_per_episode, fog, visualise):
+    def __init__(self, map_name, screen_size, minimap_size, max_units, steps_per_action, steps_per_episode, fog, visualise):
         self.unit_embed_lookup = get_unit_embed_lookup()
         self.buff_embed_lookup = get_buff_embed_lookup()
         self.action_embed_lookup = get_action_embed_lookup()
         self.action_id_lookup = dict((reversed(item) for item in self.action_embed_lookup.items()))
         self.args_size_lookup = get_arg_size_lookup(screen_size, minimap_size)
+        self.unit_max = max_units
 
         from absl import flags
         flags.FLAGS.mark_as_parsed()
@@ -279,7 +280,6 @@ class Sc2:
                                      Player.warp_gate_count]]
 
         # units on the screen => limit to 200
-        size = 30
         units = timestep.observation.feature_units
         unit_type_ids = list(units[:, 0])
 
@@ -354,7 +354,7 @@ class Sc2:
 
         units_out = np.concatenate([unit_embed_ids, unit_features], 1)
 
-        unit_dim = size - np.size(units_out, 0)
+        unit_dim = self.unit_max - np.size(units_out, 0)
         feature_dim = np.size(units_out, 1)
         unit_padding = np.zeros((unit_dim, feature_dim), dtype=np.long)
         obs['units'] = np.concatenate([units_out, unit_padding])

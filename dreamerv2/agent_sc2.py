@@ -8,7 +8,6 @@ from models.set_prior import SetPrior
 from pysc2.lib.features import Visibility, Effects, PlayerRelative
 from pysc2.lib.units import get_unit_embed_lookup
 from losses.prob_chamfer_distance import prob_chamfer_distance
-from sc2_nets import Sc2ScreenDecoder
 
 
 class Sc2Agent(common.Module):
@@ -18,15 +17,7 @@ class Sc2Agent(common.Module):
         self._action_space = actspce
         self._act_size = sum([self._action_space[a].n for a in self._action_space])
 
-        # create a lookup to find which actions each arg is used for, because its a pain to do action-to-arg in TF when iterating by arg types
-        arg_space_sizes = {key: (value.n,) for (key, value) in actspce.items() if key != 'action_id'}
-        self.actions_using_arg = {}
-        for arg in arg_space_sizes:
-            acts = []
-            for act in (range(actspce['action_id'].n)):
-                if arg in action_required_args[act]:
-                    acts.append(act)
-            self.actions_using_arg[arg] = tf.constant(acts, dtype=tf.int32)
+        self.arg_keys = [key for (key, value) in actspce.items() if key != 'action_id']
 
         self._should_expl = elements.Until(int(
             config.expl_until / config.action_repeat))
@@ -66,31 +57,17 @@ class Sc2Agent(common.Module):
         feat_action = tf.concat([feat, tf.cast(chosen_action_oh, feat.dtype)], -1)
         arg_policy_out = arg_actor(tf.stop_gradient(feat_action))
 
-        action_set = {}
-        for arg_key in arg_policy_out:
-            # tile our chosen actions and check if this arg is required for each action
-            actions_needing_arg = self.actions_using_arg[arg_key]
-            actions_tiled = tf.tile(tf.expand_dims(chosen_action_id, -1), [1, tf.size(actions_needing_arg)])
-            needed = tf.cast(tf.greater(tf.math.count_nonzero(tf.equal(actions_tiled, actions_needing_arg), axis=-1), 0), tf.float32)
-
-            # get our arg vals and add a padding row
+        args = {}
+        for a in self.arg_keys:
             if should_sample:
-                arg_vals = arg_policy_out[arg_key].sample()
+                arg_val = arg_policy_out[a].sample()
             else:
-                arg_vals = arg_policy_out[arg_key].mode()
+                arg_val = arg_policy_out[a].mode()
 
-            arg_vals = common.sc2_arg_noise(arg_vals, noise)
-            arg_vals_padded = tf.concat([tf.zeros((1, tf.shape(arg_vals)[1]), tf.float32), arg_vals], axis=0)
+            arg_val = common.sc2_arg_noise(arg_val, noise)
+            args[a] = arg_val
 
-            # only gather used arguments, get the padding row for everything else
-            all_indices = tf.range(0, tf.shape(arg_vals)[0], dtype=tf.float32) + 1  # bump all indexes by 1, and use 0 for a padding row
-            gather_indices = tf.cast(all_indices * needed, tf.int32)
-            padded_args = tf.gather(arg_vals_padded, gather_indices, axis=0)
-
-            action_set[arg_key] = padded_args
-        action_set['action_id'] = chosen_action_oh
-
-        return action_set
+        return chosen_action_oh, args
 
     @tf.function
     def policy(self, obs, state=None, mode='train'):
@@ -109,17 +86,18 @@ class Sc2Agent(common.Module):
         latent, _ = self.wm.rssm.obs_step(latent, action, embed, sample)
         feat = self.wm.rssm.get_feat(latent)
         if mode == 'eval':
-            action_set = self.get_sc2_action(self._task_behavior.type_actor, self._task_behavior.arg_actor, feat, obs['available_actions'], False, mode)
+            action, args = self.get_sc2_action(self._task_behavior.type_actor, self._task_behavior.arg_actor, feat, obs['available_actions'], False, mode)
         elif self._should_expl(self.step):
-            action_set = self.get_sc2_action(self._expl_behavior.type_actor, self._expl_behavior.arg_actor, feat, obs['available_actions'], True, mode)
+            action, args = self.get_sc2_action(self._expl_behavior.type_actor, self._expl_behavior.arg_actor, feat, obs['available_actions'], True, mode)
         else:
-            action_set = self.get_sc2_action(self._task_behavior.type_actor, self._task_behavior.arg_actor, feat, obs['available_actions'], True, mode)
+            action, args = self.get_sc2_action(self._task_behavior.type_actor, self._task_behavior.arg_actor, feat, obs['available_actions'], True, mode)
 
-        outputs = action_set
+        action_vec = self.wm.action_preprocess(action, args)
 
-        action_vec = self.wm.action_preprocess(action_set)
+        args['action_id'] = action
+
         state = (latent, action_vec)
-        return outputs, state
+        return args, state
 
     @tf.function
     def train(self, data, state=None):
@@ -153,7 +131,6 @@ class Sc2WorldModel(common.Module):
         self.heads = {}
         self.act_space = actspace
 
-        # create a lookup to find which actions each arg is used for, because its a pain to do action-to-arg in TF when iterating by arg types
         self.arg_keys = [key for (key, value) in actspace.items() if key != 'action_id']
 
         self.num_unit_types = len(get_unit_embed_lookup())
@@ -189,7 +166,11 @@ class Sc2WorldModel(common.Module):
     def loss(self, data, state=None):
         data = self.preprocess(data)
         embed = self.encoder(data)
-        action_input = self.action_preprocess(data)
+        args = {'arg_0_0': data['arg_0_0'], 'arg_0_1': data['arg_0_1'], 'arg_1_0': data['arg_1_0'], 'arg_1_1': data['arg_1_1'],
+                'arg_2_0': data['arg_2_0'], 'arg_2_1': data['arg_2_1'], 'arg_3_0': data['arg_3_0'], 'arg_4_0': data['arg_4_0'],
+                'arg_5_0': data['arg_5_0'], 'arg_6_0': data['arg_6_0'], 'arg_7_0': data['arg_7_0'], 'arg_9_0': data['arg_9_0'], 'arg_10_0': data['arg_10_0']}
+
+        action_input = self.action_preprocess(data['action_id'], args)
         post, prior = self.rssm.observe(embed, action_input, state)
         kl_loss, kl_value = self.rssm.kl_loss(post, prior, **self.config.kl)
         assert len(kl_loss.shape) == 0
@@ -225,7 +206,7 @@ class Sc2WorldModel(common.Module):
                                                      unit_dists['unit_cloaked'], tf.cast(data['unit_cloaked'], tf.int32),
                                                      unit_dists['unit_continuous'], tf.cast(data['unit_continuous'], tf.float32),
                                                      unit_dists['unit_binary'], tf.cast(data['unit_binary'], tf.int32),
-                                                     set_sizes), tf.float32)
+                                                     set_sizes, self.config.max_units), tf.float32)
                 likes[name] = like
                 losses[name] = -like.mean()
             elif name == 'screen':
@@ -254,7 +235,7 @@ class Sc2WorldModel(common.Module):
         start = {k: flatten(v) for k, v in start.items()}
 
         def step(prev, _):
-            state, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _ = prev
+            state, _, _, _ = prev
             feat = self.rssm.get_feat(state)
             norm_policy, onehot_policy = action_policy(tf.stop_gradient(feat))
             action_prob = tf.nn.softmax(norm_policy.sample())
@@ -267,26 +248,15 @@ class Sc2WorldModel(common.Module):
 
             feat_action = tf.concat([feat, tf.cast(chosen_action_oh, feat.dtype)], -1)
             arg_policy_out = arg_policy(tf.stop_gradient(feat_action))  # dont train action policy while updating arg policy
+            args = {}
+            for a in self.arg_keys:
+                args[a] = arg_policy_out[a].sample()
 
-            args = [arg_policy_out['arg_0_0'].sample(),
-                    arg_policy_out['arg_0_1'].sample(),
-                    arg_policy_out['arg_1_0'].sample(),
-                    arg_policy_out['arg_1_1'].sample(),
-                    arg_policy_out['arg_2_0'].sample(),
-                    arg_policy_out['arg_2_1'].sample(),
-                    arg_policy_out['arg_3_0'].sample(),
-                    arg_policy_out['arg_4_0'].sample(),
-                    arg_policy_out['arg_5_0'].sample(),
-                    arg_policy_out['arg_6_0'].sample(),
-                    arg_policy_out['arg_7_0'].sample(),
-                    arg_policy_out['arg_9_0'].sample(),
-                    arg_policy_out['arg_10_0'].sample()]
-
-            action_vec = self.action_preprocess(chosen_action_oh, *args)
+            action_vec = self.action_preprocess(chosen_action_oh, args)
 
             succ = self.rssm.img_step(state, action_vec)
 
-            return succ, feat, chosen_action_oh, arg_policy_out, *args
+            return succ, feat, action_prob, args
 
         feat = 0 * self.rssm.get_feat(start)
 
@@ -298,21 +268,12 @@ class Sc2WorldModel(common.Module):
 
         init_feat_action = tf.concat([feat, tf.cast(init_chosen_action, feat.dtype)], -1)
         init_arg_policy_out = arg_policy(init_feat_action)
-        init_args = [init_arg_policy_out['arg_0_0'].mode(),
-                     init_arg_policy_out['arg_0_1'].mode(),
-                     init_arg_policy_out['arg_1_0'].mode(),
-                     init_arg_policy_out['arg_1_1'].mode(),
-                     init_arg_policy_out['arg_2_0'].mode(),
-                     init_arg_policy_out['arg_2_1'].mode(),
-                     init_arg_policy_out['arg_3_0'].mode(),
-                     init_arg_policy_out['arg_4_0'].mode(),
-                     init_arg_policy_out['arg_5_0'].mode(),
-                     init_arg_policy_out['arg_6_0'].mode(),
-                     init_arg_policy_out['arg_7_0'].mode(),
-                     init_arg_policy_out['arg_9_0'].mode(),
-                     init_arg_policy_out['arg_10_0'].mode()]
 
-        succs, feats, actions, args = common.static_scan(step, tf.range(horizon), (start, feat, init_action, *init_args))
+        init_args = {}
+        for a in self.arg_keys:
+            init_args[a] = init_arg_policy_out[a].mode()
+
+        succs, feats, actions, args = common.static_scan(step, tf.range(horizon), (start, feat, init_action, init_args))
 
         states = {k: tf.concat([start[k][None], v[:-1]], 0) for k, v in succs.items()}
         if 'discount' in self.heads:
@@ -389,13 +350,10 @@ class Sc2WorldModel(common.Module):
         return obs
 
     @tf.function
-    def action_preprocess(self, action, arg_0_0, arg_0_1, arg_1_0, arg_1_1,
-                          arg_2_0, arg_2_1, arg_3_0, arg_4_0,
-                          arg_5_0, arg_6_0, arg_7_0, arg_9_0, arg_10_0):
-
-        return tf.concat([action, arg_0_0, arg_0_1, arg_1_0, arg_1_1,
-                          arg_2_0, arg_2_1, arg_3_0, arg_4_0,
-                          arg_5_0, arg_6_0, arg_7_0, arg_9_0, arg_10_0], axis=-1)
+    def action_preprocess(self, action, args):
+        return tf.concat([action, args['arg_0_0'], args['arg_0_1'], args['arg_1_0'], args['arg_1_1'],
+                          args['arg_2_0'], args['arg_2_1'], args['arg_3_0'], args['arg_4_0'],
+                          args['arg_5_0'], args['arg_6_0'], args['arg_7_0'], args['arg_9_0'], args['arg_10_0']], axis=-1)
 
     @tf.function
     def video_pred(self, data):
@@ -434,6 +392,8 @@ class Sc2ActorCritic(common.Module):
                 if arg in action_required_args[act]:
                     acts.append(act)
             self.actions_using_arg[arg] = tf.constant(acts, dtype=tf.int32)
+
+        self.arg_keys = list(self.actions_using_arg.keys())
 
         if config.slow_target:
             self._target_critic = common.Sc2MLP([], **config.critic)
@@ -505,8 +465,8 @@ class Sc2ActorCritic(common.Module):
 
         arg_head_losses = tf.TensorArray(tf.float32, size=0, dynamic_size=True)
         num_args_used = 0
-        for arg_key in policy:
 
+        for arg_key in self.arg_keys:
             if self.config.actor_grad == 'dynamics':
                 objective = target
             elif self.config.actor_grad == 'reinforce':
