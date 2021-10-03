@@ -358,12 +358,12 @@ class Sc2WorldModel(common.Module):
     @tf.function
     def video_pred(self, data):
         data = self.preprocess(data)
-        truth_screen_visibility = data['screen_visibility'][:6]
-        truth_screen_height = data['screen_height'][:6]
-        truth_screen_creep = data['screen_creep'][:6]
-        truth_screen_buildable = data['screen_buildable'][:6]
-        truth_screen_pathable = data['screen_pathable'][:6]
-        truth_screen_effects = data['screen_effects'][:6]
+        # truth_screen_visibility = data['screen_visibility'][:6]
+        # truth_screen_height = data['screen_height'][:6]
+        # truth_screen_creep = data['screen_creep'][:6]
+        # truth_screen_buildable = data['screen_buildable'][:6]
+        # truth_screen_pathable = data['screen_pathable'][:6]
+        # truth_screen_effects = data['screen_effects'][:6]
 
         truth_unit_id = data['unit_id'][:6]
         truth_unit_alliance = data['unit_alliance'][:6]
@@ -372,9 +372,13 @@ class Sc2WorldModel(common.Module):
         truth_unit_binary = data['unit_binary'][:6]
 
         embed = self.encoder(data)
-        states, _ = self.rssm.observe(embed[:6, :5], data['action'][:6, :5])
+        full_action = self.action_preprocess(data['action_id'], data)
+        states, _ = self.rssm.observe(embed[:6, :5], full_action[:6, :5])
 
         state_feat = self.rssm.get_feat(states)
+        init = {k: v[:, -1] for k, v in states.items()}
+        prior = self.rssm.imagine(full_action[:6, 5:], init)
+        prior_feat = self.rssm.get_feat(prior)
 
         unpadded_units = tf.cast(tf.not_equal(truth_unit_id[..., 0], 1), dtype=tf.int32)  # find indices where unit type not 0
         set_sizes = tf.reduce_sum(unpadded_units, axis=-1)
@@ -382,10 +386,7 @@ class Sc2WorldModel(common.Module):
 
         unit_recon_dists = self.heads['units'](initial_set[:6, :5], state_feat, set_sizes[:6, :5])
 
-        init = {k: v[:, -1] for k, v in states.items()}
-        prior = self.rssm.imagine(data['action'][:6, 5:], init)
-        prior_feat = self.rssm.get_feat(prior)
-        unit_openl_dists = self.heads['units'](initial_set[:6, :5], prior_feat, set_sizes[:6, :5]).mode()
+        unit_openl_dists = self.heads['units'](initial_set[:6, 5:], prior_feat, set_sizes[:6, 5:])
 
         unit_recon = {}
         unit_openl = {}
@@ -394,12 +395,6 @@ class Sc2WorldModel(common.Module):
             unit_recon = unit_recon_dists[u].mode()[:6]
             unit_openl = unit_openl_dists[u].mode()[:6]
             model[u] = tf.concat([unit_recon[:, :5], unit_openl], 1)
-
-        model = tf.concat([recon[:, :5] + 0.5, openl + 0.5], 1)
-        error = (model - truth + 1) / 2
-        video = tf.concat([truth, model, error], 2)
-        B, T, H, W, C = video.shape
-        return video.transpose((1, 2, 0, 3, 4)).reshape((T, H, B * W, C))
 
 
 class Sc2ActorCritic(common.Module):

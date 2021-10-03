@@ -14,7 +14,7 @@ defaults:
   image_size: [64, 64]
   grayscale: False
   replay_size: 2e4
-  dataset: {batch: 3, length: 20, oversample_ends: True}
+  dataset: {batch: 15, length: 20, oversample_ends: True}
   precision: 16
   jit: False
 
