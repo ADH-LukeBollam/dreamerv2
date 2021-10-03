@@ -16,7 +16,7 @@ defaults:
   replay_size: 2e4
   dataset: {batch: 3, length: 20, oversample_ends: True}
   precision: 16
-  jit: True
+  jit: False
 
   # Env Settings
   screen_size: 64

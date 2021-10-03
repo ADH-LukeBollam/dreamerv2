@@ -176,8 +176,8 @@ class WorldModel(common.Module):
         truth = data['image'][:6] + 0.5
         embed = self.encoder(data)
         states, _ = self.rssm.observe(embed[:6, :5], data['action'][:6, :5])
-        recon = self.heads['image'](
-            self.rssm.get_feat(states)).mode()[:6]
+        recon = self.heads['image'](self.rssm.get_feat(states)).mode()
+        recon = recon[:6]
         init = {k: v[:, -1] for k, v in states.items()}
         prior = self.rssm.imagine(data['action'][:6, 5:], init)
         openl = self.heads['image'](self.rssm.get_feat(prior)).mode()
