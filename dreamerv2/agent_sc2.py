@@ -366,10 +366,6 @@ class Sc2WorldModel(common.Module):
         # truth_screen_effects = data['screen_effects'][:6]
 
         truth_unit_id = data['unit_id'][:6]
-        truth_unit_alliance = data['unit_alliance'][:6]
-        truth_unit_cloaked = data['unit_id'][:6]
-        truth_unit_continuous = data['unit_id'][:6]
-        truth_unit_binary = data['unit_binary'][:6]
 
         embed = self.encoder(data)
         full_action = self.action_preprocess(data['action_id'], data)
@@ -388,13 +384,15 @@ class Sc2WorldModel(common.Module):
 
         unit_openl_dists = self.heads['units'](initial_set[:6, 5:], prior_feat, set_sizes[:6, 5:])
 
-        unit_recon = {}
-        unit_openl = {}
         model = {}
+        truth = {}
         for u in unit_recon_dists:
             unit_recon = unit_recon_dists[u].mode()[:6]
             unit_openl = unit_openl_dists[u].mode()[:6]
             model[u] = tf.concat([unit_recon[:, :5], unit_openl], 1)
+            truth[u] = data[u][:6]
+
+        return truth, model
 
 
 class Sc2ActorCritic(common.Module):

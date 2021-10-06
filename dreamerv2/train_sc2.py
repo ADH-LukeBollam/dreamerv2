@@ -139,6 +139,7 @@ def train_step(tran):
         for name, values in metrics.items():
             logger.scalar(name, np.array(values, np.float64).mean())
             metrics[name].clear()
+
         logger.add(agnt.report(next(train_dataset)), prefix='train')
         logger.write(fps=True)
 
