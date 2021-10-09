@@ -1,84 +1,51 @@
-import io
-import matplotlib.pyplot as plt
 import tensorflow as tf
-import matplotlib.animation as animation
 from tensorflow_probability import distributions as tfd
+import cv2 as cv
+import numpy as np
 
 
-class AnimatedMnist:
-    """An animated scatter plot using matplotlib.animations.FuncAnimation."""
-    def __init__(self, true, pred):
+class Sc2Video:
+    def __init__(self, img_res, video_batches):
         # shape is [batch, step, unit, features]
 
-        self.true = true
-        self.pred = pred
+        self.img_res = img_res
 
-        self.batch_size = true['unit_id'].shape[0]
-        self.total_frames = true['unit_id'].shape[1]
+        self.video_batches = video_batches
 
-        img_size = 6
-        plots_per_sample = 2
+        self.batch_size = video_batches[0]['unit_id'].shape[0]
+        self.total_frames = video_batches[0]['unit_id'].shape[1]
+        self.num_videos = len(video_batches)
 
-        self.fig, self.ax = plt.subplots(self.batch_size, plots_per_sample, figsize=(plots_per_sample * img_size, self.batch_size * img_size))
-        for ax in self.ax.flat:
-            ax.axis([0, 1, 1, 0], )
-            ax.set_xticks([])
-            ax.set_yticks([])
+    def get_frames(self):
+        frames = []
 
-        self.fig.subplots_adjust()
+        for f in range(self.total_frames):
+            frame = np.zeros((self.img_res * self.batch_size, self.img_res * self.num_videos, 1))
 
-        self.stream = self.data_stream()
+            for v in range(self.num_videos):
+                x_offset = v * self.img_res
 
-        self.artists = []
+                for b in range(self.batch_size):
+                    y_offset = f * self.img_res
 
-        # Then setup FuncAnimation.
-        self.ani = animation.FuncAnimation(self.fig, self.update, interval=1000,
-                                           blit=True, save_count=self.total_frames - 1, frames=self.total_frames - 1, repeat=False)
+                    id = np.array(tf.argmax(self.video_batches[v]['unit_id'][b, f, :, :], axis=-1))
+                    x = np.array(self.video_batches[v]['unit_continuous'][b, f, :, 5])
+                    y = np.array(self.video_batches[v]['unit_continuous'][b, f, :, 6])
 
-    def data_stream(self):
-        for i in range(self.total_frames):
-            id = self.true['unit_id'][:, i, :]
-            id_h = self.pred['unit_id'][:, i, :]
+                    unpadded_units = np.not_equal(id, 0).astype(int)  # find indices where unit type not 0
+                    num_units = int(np.sum(unpadded_units, axis=-1))
 
-            x = self.true['unit_continuous'][:, i, :, 5]
-            y = self.true['unit_continuous'][:, i, :, 6]
+                    for u in range(num_units):
+                        unit_x = int(x[u] * self.img_res + x_offset)
+                        unit_y = int(y[u] * self.img_res + y_offset)
+                        cv.circle(frame, (unit_x, unit_y), 10, (255,), -1)
+                        pass
 
-            x_h = self.pred['unit_continuous'][:, i, :, 5]
-            y_h = self.pred['unit_continuous'][:, i, :, 6]
+            cv.imwrite('color_img.jpg', frame)
+            cv.imshow("image", frame)
+            cv.waitKey()
 
-            yield id, id_h, x, y, x_h, y_h
-
-    def update(self, i):
-        """Update the scatter plot."""
-        id, id_h, x, y, x_h, y_h = next(self.stream)
-
-        if len(self.artists) > 0:
-            for art in self.artists:
-                art.remove()
-
-        for i in range(self.batch_size):
-            self.artists = []
-
-            unpadded_units = tf.cast(tf.not_equal(id[i, :, 0], 1), dtype=tf.int32)  # find indices where unit type not 0
-            set_size = tf.reduce_sum(unpadded_units, axis=-1)
-
-            self.artists.append(self.ax[i, 0].scatter(x[i, 0:set_size], y[i, 0:set_size], s=150, c='green'))
-            ids = tf.argmax(id[i, 0:set_size], axis=-1)
-
-            for j, txt in enumerate(ids):
-                val = str(txt.numpy())
-                self.artists.append(self.ax[i, 0].annotate(val, (x[i, j], y[i, j])))
-
-            self.artists.append(self.ax[i, 1].scatter(x_h[i, 0:set_size], y_h[i, 0:set_size], s=150, c='green'))
-            ids_h = tf.argmax(id_h[i, 0:set_size], axis=-1)
-            for j, txt in enumerate(ids_h):
-                val = str(txt.numpy())
-                self.artists.append(self.ax[i, 1].annotate(val, (x_h[i, j], y_h[i, j])))
-
-        return self.artists
-
-    def save(self):
-        self.ani.save('animation2.gif', writer='imagemagick', fps=1)
+            frames.append(frame)
 
 
 if __name__ == '__main__':
@@ -88,15 +55,15 @@ if __name__ == '__main__':
 
     true = {
         'unit_id': id_dist.sample(),
-        'unit_continuous': continuous_dist.sample(),
+        'unit_continuous': continuous_dist.sample() + 0.5,
         'unit_binary': binary_dist.sample()
     }
 
     pred = {
         'unit_id': id_dist.sample(),
-        'unit_continuous': continuous_dist.sample(),
+        'unit_continuous': continuous_dist.sample() + 0.5,
         'unit_binary': binary_dist.sample()
     }
 
-    guy = AnimatedMnist(true, pred)
-    guy.save()
+    guy = Sc2Video(256, [true, pred])
+    guy.get_frames()
