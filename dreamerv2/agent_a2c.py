@@ -202,18 +202,20 @@ class A2CAgent(common.Module):
         return metrics, obs
 
     @tf.function
-    def train(self, obs, env):
+    def train(self, obs, envs):
         metrics = {}
         with tf.GradientTape(persistent=True) as actor_tape:
 
             obs_embed, action_prob, action_oh, args = self.policy(obs)
             args['action_id'] = action_oh   # combine action and args together
 
-            ob, reward, done, info = env.step({k: np.squeeze(v) for k, v in args.items()})
-
-            disc = info.get('discount', np.array(1 - float(done)))
-            obs = {**ob, 'reward': reward, 'discount': disc, 'done': done}
-            obs = {k: np.expand_dims(self._convert(v), 0) for k, v in obs.items()}
+            obs = []
+            for i, env in enumerate(envs):
+                ob, reward, done, info = env.step({k: np.squeeze(v) for k, v in args.items()})
+                disc = info.get('discount', np.array(1 - float(done)))
+                tran = {**ob, 'reward': reward, 'discount': disc, 'done': done}
+                obs.append({k: np.expand_dims(self._convert(v), 0) for k, v in tran.items()})
+            obs = {k: np.stack([o[k] for o in self._obs]) for k in self._obs[0]}
 
             target, mets1 = self.target(obs_embed, action_oh, args, obs['reward'], obs['discount'])
 
