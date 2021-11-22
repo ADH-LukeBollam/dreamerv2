@@ -5,29 +5,11 @@ import os
 import pathlib
 import sys
 import warnings
-
-from sc2_logging.sc2_video import Sc2Video
-from sc2_random_agent import Sc2RandomAgent
-
-try:
-    import rich.traceback
-
-    rich.traceback.install()
-except ImportError:
-    pass
-
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-logging.getLogger().setLevel('ERROR')
-warnings.filterwarnings('ignore', '.*box bound precision lowered.*')
-
-sys.path.append(str(pathlib.Path(__file__).parent))
-sys.path.append(str(pathlib.Path(__file__).parent.parent))
-
 import numpy as np
 import ruamel.yaml as yaml
 import tensorflow as tf
 
-import agent_sc2
+import agent_a2c
 import elements
 import common
 
@@ -59,9 +41,7 @@ if config.precision == 16:
     prec.set_policy(prec.Policy('mixed_float16'))
 
 print('Logdir', logdir)
-train_replay = common.Replay(logdir / 'train_replay', config.replay_size)
-eval_replay = common.Replay(logdir / 'eval_replay', config.time_limit or 1)
-step = elements.Counter(train_replay.total_steps)
+step = elements.Counter(0)
 outputs = [
     elements.TerminalOutput(),
     elements.JSONLOutput(logdir),
@@ -73,7 +53,6 @@ should_train = elements.Every(config.train_every)
 should_log = elements.Every(config.log_every)
 should_video_train = elements.Every(config.eval_every)
 should_video_eval = elements.Every(config.eval_every)
-
 
 def make_env(mode):
     suite, task = config.task.split('_', 1)
@@ -89,77 +68,48 @@ def per_episode(ep, mode):
     length = len(ep['reward']) - 1
     score = float(ep['reward'].astype(np.float64).sum())
     print(f'{mode.title()} episode has {length} steps and return {score:.1f}.')
-    replay_ = dict(train=train_replay, eval=eval_replay)[mode]
-    replay_.add(ep)
-    logger.scalar(f'{mode}_transitions', replay_.num_transitions)
     logger.scalar(f'{mode}_return', score)
     logger.scalar(f'{mode}_length', length)
-    logger.scalar(f'{mode}_eps', replay_.num_episodes)
     logger.write()
 
 
 print('Create envs.')
-train_envs = [make_env('train') for _ in range(config.num_envs)]
-eval_envs = [make_env('eval') for _ in range(config.num_envs)]
-action_space = train_envs[0].action_space
-action_req_args = train_envs[0].action_arg_lookup
-train_driver = common.Driver(train_envs)
+train_env = make_env('train')
+eval_env = make_env('eval')
+action_space = train_env.action_space
+action_req_args = train_env.action_arg_lookup
+train_driver = common.A2CDriver(train_env)
 train_driver.on_episode(lambda ep: per_episode(ep, mode='train'))
 train_driver.on_step(lambda _: step.increment())
-eval_driver = common.Driver(eval_envs)
+eval_driver = common.A2CDriver(eval_env)
 eval_driver.on_episode(lambda ep: per_episode(ep, mode='eval'))
 
-prefill = max(0, config.prefill - train_replay.total_steps)
-if prefill:
-    print(f'Prefill dataset ({prefill} steps).')
-    random_agent = Sc2RandomAgent(action_space)
-    train_driver(random_agent, steps=prefill, episodes=1)
-    eval_driver(random_agent, episodes=1)
-    train_driver.reset()
-    eval_driver.reset()
-
 print('Create agent.')
-train_dataset = iter(train_replay.dataset(**config.dataset))
-eval_dataset = iter(eval_replay.dataset(**config.dataset))
-agnt = agent_sc2.Sc2Agent(config, logger, action_space, step, train_dataset, action_req_args)
+agnt = agent_a2c.A2CAgent(config, logger, action_space, step, action_req_args, train_env)
 if (logdir / 'variables.pkl').exists():
     agnt.load(logdir / 'variables.pkl')
-else:
-    config.pretrain and print('Pretrain agent.')
-    for _ in range(config.pretrain):
-        agnt.train(next(train_dataset))
 
 
-def train_step(tran):
-    if should_train(step):
-
-        for _ in range(config.train_steps):
-            _, mets = agnt.train(next(train_dataset))
-            [metrics[key].append(value) for key, value in mets.items()]
+def train_step(mets):
     if should_log(step):
+        for _ in range(config.train_steps):
+            [metrics[key].append(value) for key, value in mets.items()]
         for name, values in metrics.items():
             logger.scalar(name, np.array(values, np.float64).mean())
             metrics[name].clear()
-
-        out = agnt.report(next(train_dataset))
-        logger.add({'openl': Sc2Video.get_frames(512, [out['openl'][0], out['openl'][1]])}, prefix='train')
-        logger.write(fps=True)
 
 
 train_driver.on_step(train_step)
 
 while step < config.steps:
-
     logger.write()
     print('Start evaluation.')
-    # logger.add(agnt.report(next(eval_dataset)), prefix='eval')
-    eval_policy = functools.partial(agnt.policy, mode='eval')
-    eval_driver(eval_policy, episodes=config.eval_eps)
+    eval_driver(agnt.eval, episodes=config.eval_eps)
     print('Start training.')
-    train_driver(agnt.policy, steps=config.eval_every)
+    train_driver(agnt.train, steps=config.eval_every)
     agnt.save(logdir / 'variables.pkl')
 
-for env in train_envs + eval_envs:
+for env in [train_env, eval_env]:
     try:
         env.close()
     except Exception:

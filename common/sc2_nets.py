@@ -158,11 +158,11 @@ class Sc2Encoder(common.Module):
                  unit_embed_dim=16, unit_pp_dim=64, unit_num_layers=2, unit_trans_dim=256, unit_trans_heads=4,
                  mixing_widths=(512,)):
         self._avl_action_encoder = Sc2MlpEncoder('avl_action', act, avl_action_widths)
-        self._screen_encoder = Sc2ConvEncoder('screen', screen_depth, act, screen_kernels)
-        self._minimap_encoder = Sc2ConvEncoder('minimap', minimap_depth, act, minimap_kernels)
-        self._player_encoder = Sc2MlpEncoder('player', act, player_widths)
+        # self._screen_encoder = Sc2ConvEncoder('screen', screen_depth, act, screen_kernels)
+        # self._minimap_encoder = Sc2ConvEncoder('minimap', minimap_depth, act, minimap_kernels)
+        # self._player_encoder = Sc2MlpEncoder('player', act, player_widths)
         self._unit_encoder = UnitEncoder(unit_pp_dim, unit_num_layers, unit_trans_dim, unit_trans_heads)
-        self._mixing_encoder = Sc2MlpEncoder('mixing', act, mixing_widths)
+        # self._mixing_encoder = Sc2MlpEncoder('mixing', act, mixing_widths)
 
         num_unit_types = len(set(get_unit_embed_lookup().values()))
         self.unit_type_embedding = tf.keras.layers.Embedding(num_unit_types, unit_embed_dim)
@@ -171,26 +171,30 @@ class Sc2Encoder(common.Module):
     def __call__(self, obs):
         avl_actions = self._avl_action_encoder(obs['available_actions'])
 
-        screen_obs = tf.concat([obs['screen_visibility'], obs['screen_height'], obs['screen_creep'], obs['screen_buildable'], obs['screen_pathable'], obs['screen_effects']], axis=-1)
-        screen = self._screen_encoder(screen_obs)
+        # screen_obs = tf.concat([obs['screen_visibility'], obs['screen_height'], obs['screen_creep'], obs['screen_buildable'], obs['screen_pathable'], obs['screen_effects']], axis=-1)
+        # screen = self._screen_encoder(screen_obs)
+        #
+        # minimap = self._minimap_encoder(obs['mini'])
+        # player = self._player_encoder(obs['player'])
 
-        minimap = self._minimap_encoder(obs['mini'])
-        player = self._player_encoder(obs['player'])
+        # unit_feats = self.get_unit_feats(obs['unit_id'], obs['unit_alliance'], obs['unit_cloaked'], obs['unit_continuous'], obs['unit_binary'])
+        # unit_feats = self.get_unit_feats(obs['unit_id'], obs['unit_continuous'], obs['unit_binary'])
+        # units = self._unit_encoder(unit_feats)
 
-        unit_feats = self.get_unit_feats(obs['unit_id'], obs['unit_alliance'], obs['unit_cloaked'], obs['unit_continuous'], obs['unit_binary'])
-        units = self._unit_encoder(unit_feats)
+        units = self._unit_encoder(obs['unit_continuous'])
 
-        state_embed = tf.concat([avl_actions, screen, minimap, player, units], -1)
-        mixed = self._mixing_encoder(state_embed)
+        # state_embed = tf.concat([avl_actions, screen, minimap, player, units], -1)
+        # mixed = self._mixing_encoder(state_embed)
 
-        return mixed
+        return units
 
     @tf.function
-    def get_unit_feats(self, unit_ids_onehot, unit_alliance, unit_cloaked, unit_continuous, unit_binary):
+    # def get_unit_feats(self, unit_ids_onehot, unit_alliance, unit_cloaked, unit_continuous, unit_binary):
+    def get_unit_feats(self, unit_ids_onehot, unit_continuous, unit_binary):
         unit_ids = tf.argmax(unit_ids_onehot, axis=-1)
         embedded = self.unit_type_embedding(unit_ids)
 
-        unit_attributes = tf.concat([unit_alliance, unit_cloaked, unit_continuous, unit_binary], axis=-1)
+        unit_attributes = tf.concat([unit_continuous, unit_binary], axis=-1)
 
         return tf.concat([embedded, unit_attributes], axis=-1)
 
@@ -262,11 +266,10 @@ class UnitDecoder(common.Module):
     def __init__(self, num_layers, trans_dim, trans_heads):
         super(UnitDecoder, self).__init__()
         # process initial set to transformer dimension
-        self.embedding = tf.keras.layers.Conv1D(trans_dim, 1, kernel_initializer='glorot_uniform', use_bias=True,
-                                                bias_initializer=tf.constant_initializer(0.1))\
 
         self.num_layers = num_layers
         self.trans_dim = trans_dim
+        self.embedding = [tf.keras.layers.Conv1D(trans_dim, 1, kernel_initializer='glorot_uniform', use_bias=True) for _ in range(num_layers)]
         self.transformer = [TransformerLayer(trans_dim, trans_heads) for _ in range(num_layers)]
         self.num_unit_types = len(set(get_unit_embed_lookup().values()))
 
@@ -278,25 +281,25 @@ class UnitDecoder(common.Module):
         set_size = tf.shape(x)[1]     # batch, set, features
 
         # concat the encoding vector onto each initial set element
-        encoded_shaped = tf.tile(x_encoding, [1, set_size, 1])
-        conditioned_initial_set = tf.concat([x, encoded_shaped], 2)
+        conditioning = tf.tile(x_encoding, [1, set_size, 1])
+        # conditioned_initial_set = tf.concat([x, encoded_shaped], 2)
 
         mask = tf.reshape(tf.cast(tf.math.logical_not(tf.sequence_mask(sizes, set_size)), tf.float32), [-1, 1, 1, set_size])
 
-        x = self.embedding(conditioned_initial_set)
-
         for i in range(self.num_layers):
+            x = tf.concat([x, conditioning], 2)  # add conditioning vector to each point
+            x = self.embedding[i](x)
             x = self.transformer[i](x, x, mask)
 
         processed = tf.reshape(x, tf.concat([tf.shape(initial_set)[:-1], (self.trans_dim,)], 0))
 
         outs = {}
 
-        outs['unit_id'] = self.get('unit_id_out', Sc2DistLayer, (self.num_unit_types,), 'onehot_batch')(processed)
-        outs['unit_alliance'] = self.get('unit_alliance_out', Sc2DistLayer, (4,), 'onehot_batch')(processed)
-        outs['unit_cloaked'] = self.get('unit_cloaked_out', Sc2DistLayer, (4,), 'onehot_batch')(processed)
-        outs['unit_continuous'] = self.get('unit_continuous_out', Sc2DistLayer, (14,), 'mse')(processed)
-        outs['unit_binary'] = self.get('unit_binary_out', Sc2DistLayer, (48,), 'binary')(processed)
+        # outs['unit_id'] = self.get('unit_id_out', Sc2DistLayer, (self.num_unit_types,), 'onehot_batch')(processed)
+        # outs['unit_alliance'] = self.get('unit_alliance_out', Sc2DistLayer, (4,), 'onehot_batch')(processed)
+        # outs['unit_cloaked'] = self.get('unit_cloaked_out', Sc2DistLayer, (4,), 'onehot_batch')(processed)
+        outs['unit_continuous'] = self.get('unit_continuous_out', Sc2DistLayer, (2,), 'mse_small')(processed)
+        # outs['unit_binary'] = self.get('unit_binary_out', Sc2DistLayer, (1,), 'binary')(processed)
 
         return outs
 
@@ -390,6 +393,9 @@ class Sc2DistLayer(common.Module):
             std = self.get('std', tfkl.Dense, np.prod(self._dist_shape))(inputs)
             std = tf.reshape(std, tf.concat([tf.shape(inputs)[:-1], self._shape], 0))
             std = tf.cast(std, tf.float32)
+        if self._dist == 'mse_small':
+            dist = tfd.Normal(out, 0.01)
+            return tfd.Independent(dist, len(self._dist_shape))
         if self._dist == 'mse':
             dist = tfd.Normal(out, 1.0)
             return tfd.Independent(dist, len(self._dist_shape))

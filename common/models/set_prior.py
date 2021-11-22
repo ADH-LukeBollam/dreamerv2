@@ -1,55 +1,35 @@
 import tensorflow as tf
 import tensorflow_probability as tfp
 import matplotlib.pyplot as plt
+from tensorflow_probability import distributions as tfd
 from tensorflow.keras.mixed_precision import experimental as prec
-
-tfpl = tfp.layers
-tfd = tfp.distributions
-tfkl = tf.keras.layers
-tfb = tfp.bijectors
 
 
 class SetPrior(tf.keras.Model):
     def __init__(self, event_size, *args, **kwargs):
         super(SetPrior, self).__init__()
         self.event_size = event_size
-        mvnd_input_size = 2         # size 2 because loc and scale inputs
+        self.parametrization = tf.Variable(tf.zeros(self.event_size, dtype=tf.float32), dtype=tf.float32)
 
-        self.parametrization = tfpl.VariableLayer([self.event_size, mvnd_input_size], name='loc', dtype=tf.float32)
+    def call(self, batch_shape):
+        batch_rank = tf.size(batch_shape)
 
-        self.learnable_mvndiag = tfpl.DistributionLambda(
-            make_distribution_fn=lambda t: tfd.MultivariateNormalDiag(
-                loc=t[..., 0],
-                scale_diag=tf.exp(t[..., 1])
-            )
-        )
+        out_rank = tf.concat([tf.ones((batch_rank,), tf.int32), (self.event_size,)], 0)
+        out_shape = tf.reshape(self.parametrization, out_rank)
+        out = tf.tile(out_shape, tf.concat([batch_shape, (1,)], 0))
 
-    def call(self, batch_size):
-        # doesnt matter what we pass in here as tf.VariableLayer ignores input (an error gets thrown if empty though)
-        params = self.parametrization(None)
-        tiled = tf.tile(tf.expand_dims(params, 0), [batch_size, 1, 1])
-        samples = self.learnable_mvndiag(tiled)
-        return samples
+        out = tf.cast(out, prec.global_policy().compute_dtype)
 
-    def sample(self, features):
-        # doesnt matter what we pass in here as tf.VariableLayer ignores input (an error gets thrown if empty though)
-        batch_size = tf.reduce_prod(tf.shape(features)[:-1])
-        params = self.parametrization(None)
-        tiled = tf.tile(tf.expand_dims(params, 0), [batch_size, 1, 1])
-        samples = self.learnable_mvndiag(tiled)
-
-        out_shape = tf.concat([tf.shape(features)[:-1], [self.event_size]], 0)
-        shaped = tf.reshape(samples, shape=out_shape)
-
-        return shaped
+        dist = tfd.Normal(out, 1.0)
+        return tfd.Independent(dist, 1)
 
 if __name__ == '__main__':
-    batch_size = 1000
-    event_size = 2
+    ev_size = 62
+    features = tf.zeros([5, 8, ev_size])
     # set_sizes = [109, 85, 73, 100, 124, 151]
 
-    prior = SetPrior(event_size)
-    distribution = prior(batch_size)
+    prior = SetPrior(ev_size)
+    distribution = prior(tf.shape(features)[:-1])
     sample = distribution.sample()
 
     plt.scatter(sample[..., 0], sample[..., 1])

@@ -393,11 +393,9 @@ TYPES = Arguments.types(
     minimap=ArgumentType.point(),
     screen2=ArgumentType.point(),
     queued=ArgumentType.enum(QUEUED_OPTIONS, Queued),
-    control_group_act=ArgumentType.enum(
-        CONTROL_GROUP_ACT_OPTIONS, ControlGroupAct),
+    control_group_act=ArgumentType.enum(CONTROL_GROUP_ACT_OPTIONS, ControlGroupAct),
     control_group_id=ArgumentType.scalar(10),
-    select_point_act=ArgumentType.enum(
-        SELECT_POINT_ACT_OPTIONS, SelectPointAct),
+    select_point_act=ArgumentType.enum(SELECT_POINT_ACT_OPTIONS, SelectPointAct),
     select_add=ArgumentType.enum(SELECT_ADD_OPTIONS, SelectAdd),
     select_unit_act=ArgumentType.enum(SELECT_UNIT_ACT_OPTIONS, SelectUnitAct),
     select_worker=ArgumentType.enum(SELECT_WORKER_OPTIONS, SelectWorker),
@@ -1834,18 +1832,6 @@ class ValidActions(collections.namedtuple(
 
     def __reduce__(self):
         return self.__class__, tuple(self)
-
-
-def get_action_embed_lookup():
-    lookup = {}
-    index = 0
-
-    for f in _FUNCTIONS:
-        if f.general_id == 0:
-            lookup[int(f.id)] = index
-            index += 1
-
-    return lookup
 
 
 def get_arg_size_lookup(screen_size, minimap_size):

@@ -1,6 +1,7 @@
 from .other import *
 
 from .driver import *
+from .a2c_driver import *
 from .replay import *
 from .envs import *
 

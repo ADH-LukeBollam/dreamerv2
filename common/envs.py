@@ -6,7 +6,7 @@ import numpy as np
 
 from pysc2.env import sc2_env, available_actions_printer
 from pysc2.lib import actions
-from pysc2.lib.actions import get_action_embed_lookup, get_arg_size_lookup
+from pysc2.lib.actions import get_arg_size_lookup
 from pysc2.lib.buffs import get_buff_embed_lookup
 from pysc2.lib.features import ScreenFeatures, Player, FeatureUnit
 from pysc2.lib.units import get_unit_embed_lookup
@@ -137,9 +137,14 @@ class Atari:
 
 class Sc2:
     def __init__(self, map_name, screen_size, minimap_size, max_units, steps_per_action, steps_per_episode, fog, visualise):
+
+        self.blocked_actions = [
+            4   # control groups
+        ]
+
         self.unit_embed_lookup = get_unit_embed_lookup()
         self.buff_embed_lookup = get_buff_embed_lookup()
-        self.action_embed_lookup = get_action_embed_lookup()
+        self.action_embed_lookup = self._get_action_lookup()
         self.action_id_lookup = dict((reversed(item) for item in self.action_embed_lookup.items()))
         self.args_size_lookup = get_arg_size_lookup(screen_size, minimap_size)
         self.unit_max = max_units
@@ -163,6 +168,7 @@ class Sc2:
         env = available_actions_printer.AvailableActionsPrinter(env)
         self._env = env
 
+
     @property
     def available_actions(self):
         return self._env.action_spec()[0]
@@ -177,6 +183,17 @@ class Sc2:
         for i, size in enumerate(self.args_size_lookup[arg_id]):
             keys.append(f'arg_{arg_id}_{i}')
         return keys
+
+    def _get_action_lookup(self):
+        lookup = {}
+        index = 0
+
+        for f in actions._FUNCTIONS:
+            if f.general_id == 0 and f.id not in self.blocked_actions:
+                lookup[int(f.id)] = index
+                index += 1
+
+        return lookup
 
     @property
     def action_space(self):
@@ -244,7 +261,7 @@ class Sc2:
         obs = {}
 
         av_actions = timestep.observation.available_actions
-        action_indices = [self.action_embed_lookup[a] for a in av_actions]
+        action_indices = [self.action_embed_lookup[a] for a in av_actions if a not in self.blocked_actions]
         action_categorical = np.zeros(len(self.action_embed_lookup), dtype=np.int)
         action_categorical[action_indices] = 1
         obs['available_actions'] = action_categorical
@@ -358,6 +375,7 @@ class Sc2:
         feature_dim = np.size(units_out, 1)
         unit_padding = np.zeros((unit_dim, feature_dim), dtype=np.long)
         obs['units'] = np.concatenate([units_out, unit_padding])
+        obs['unit_count'] = np.size(units_out, 0)
 
         return obs
 

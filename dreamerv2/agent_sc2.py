@@ -137,10 +137,10 @@ class Sc2WorldModel(common.Module):
         self.action_input_order = self.get_action_input_order()
         self.encoder = common.Sc2Encoder(**config.encoder)
         self.heads['available_actions'] = common.MLP(actspace['action_id'].n, **config.avl_action_head)
-        self.heads['screen'] = common.Sc2ScreenDecoder(config.screen_size, **config.decoder)
-        self.heads['mini'] = common.ConvDecoder((config.mini_size, config.mini_size, 13), **config.decoder)
-        self.heads['player'] = common.MLP(6, **config.player_head)
-        self.heads['unit_init_set'] = SetPrior(86)  # after embedding unit type to 16 features, units have 86 features each
+        # self.heads['screen'] = common.Sc2ScreenDecoder(config.screen_size, **config.decoder)
+        # self.heads['mini'] = common.ConvDecoder((config.mini_size, config.mini_size, 13), **config.decoder)
+        # self.heads['player'] = common.MLP(6, **config.player_head)
+        self.heads['unit_init_set'] = SetPrior(2)  # after embedding unit type to 16 features, units have 86 features each
         self.heads['units'] = common.UnitDecoder(**config.unit_decoder)  #
         self.heads['reward'] = common.MLP([], **config.reward_head)
         if config.pred_discount:
@@ -183,11 +183,13 @@ class Sc2WorldModel(common.Module):
             if name == 'unit_init_set':
                 # to train initial unit set for the unit decoder, sample points for every unit in the batch and minimise
                 unpadded_units = tf.where(tf.not_equal(data['unit_id'][..., 0], 1))  # find indices where unit type not 0
-                total_units = tf.shape(unpadded_units)[0]
+                total_units = tf.shape(unpadded_units)[:-1]
 
                 # use our existing learned unit type embedding to convert the one-hot type and use that as label for training the prior
-                unit_feats = tf.stop_gradient(self.encoder.get_unit_feats(data['unit_id'], data['unit_alliance'], data['unit_cloaked'], data['unit_continuous'], data['unit_binary']))  # dont train our embedding layer, we just want to sample from it
-                unit_true = tf.gather_nd(unit_feats, unpadded_units)
+                # unit_feats = tf.stop_gradient(self.encoder.get_unit_feats(data['unit_id'], data['unit_alliance'], data['unit_cloaked'], data['unit_continuous'], data['unit_binary']))  # dont train our embedding layer, we just want to sample from it
+                # unit_feats = tf.stop_gradient(self.encoder.get_unit_feats(data['unit_id'], data['unit_continuous'], data['unit_binary']))  # dont train our embedding layer, we just want to sample from it
+                # unit_true = tf.gather_nd(unit_feats, unpadded_units)
+                unit_true = tf.gather_nd(data['unit_continuous'], unpadded_units)
 
                 dist = head(total_units)
                 like = tf.cast(dist.log_prob(unit_true), tf.float32)
@@ -197,15 +199,15 @@ class Sc2WorldModel(common.Module):
                 unpadded_units = tf.cast(tf.not_equal(data['unit_id'][..., 0], 1), dtype=tf.int32)  # find indices where unit type not 0
                 set_sizes = tf.reduce_sum(unpadded_units, axis=-1)
 
-                initial_set = tf.stop_gradient(self.heads['unit_init_set'].sample(data['unit_id']))  # dont train the initial unit distribution when sampling a set
+                initial_set = tf.stop_gradient(self.heads['unit_init_set'](tf.shape(data['unit_id'])[:-1]).sample())  # dont train the initial unit distribution when sampling a set
 
                 unit_dists = head(initial_set, inp, set_sizes)
 
-                like = tf.cast(prob_chamfer_distance(unit_dists['unit_id'], tf.cast(data['unit_id'], tf.int32),
-                                                     unit_dists['unit_alliance'], tf.cast(data['unit_alliance'], tf.int32),
-                                                     unit_dists['unit_cloaked'], tf.cast(data['unit_cloaked'], tf.int32),
+                like = tf.cast(prob_chamfer_distance(#unit_dists['unit_id'], tf.cast(data['unit_id'], tf.int32),
+                                                     # unit_dists['unit_alliance'], tf.cast(data['unit_alliance'], tf.int32),
+                                                     # unit_dists['unit_cloaked'], tf.cast(data['unit_cloaked'], tf.int32),
                                                      unit_dists['unit_continuous'], tf.cast(data['unit_continuous'], tf.float32),
-                                                     unit_dists['unit_binary'], tf.cast(data['unit_binary'], tf.int32),
+                                                     # unit_dists['unit_binary'], tf.cast(data['unit_binary'], tf.int32),
                                                      set_sizes, self.config.max_units), tf.float32)
                 likes[name] = like
                 losses[name] = -like.mean()
@@ -288,59 +290,62 @@ class Sc2WorldModel(common.Module):
         obs = obs.copy()
 
         # screen preproc
-        obs['screen_visibility'] = tf.one_hot(obs['screen'][..., 0], len(Visibility), dtype=dtype)  # screen visibility
-        obs['screen_height'] = tf.cast(obs['screen'][..., 1:2], dtype=dtype) / 255.0 - 0.5  # screen height
-        obs['screen_creep'] = tf.cast(obs['screen'][..., 2:3], dtype=dtype)  # creep / buildable / pathable
-        obs['screen_buildable'] = tf.cast(obs['screen'][..., 3:4], dtype=dtype)
-        obs['screen_pathable'] = tf.cast(obs['screen'][..., 4:5], dtype=dtype)
-        obs['screen_effects'] = tf.one_hot(obs['screen'][..., 5], len(Effects), dtype=dtype)  # screen effects one-hot
+        # obs['screen_visibility'] = tf.one_hot(obs['screen'][..., 0], len(Visibility), dtype=dtype)  # screen visibility
+        # obs['screen_height'] = tf.cast(obs['screen'][..., 1:2], dtype=dtype) / 255.0 - 0.5  # screen height
+        # obs['screen_creep'] = tf.cast(obs['screen'][..., 2:3], dtype=dtype)  # creep / buildable / pathable
+        # obs['screen_buildable'] = tf.cast(obs['screen'][..., 3:4], dtype=dtype)
+        # obs['screen_pathable'] = tf.cast(obs['screen'][..., 4:5], dtype=dtype)
+        # obs['screen_effects'] = tf.one_hot(obs['screen'][..., 5], len(Effects), dtype=dtype)  # screen effects one-hot
         del obs['screen']
+        del obs['mini']
+        del obs['player']
 
-        # minimap preproc
-        pp_mini_feat = []
-        pp_mini_feat.append(tf.one_hot(obs['mini'][..., 0], len(Visibility), dtype=tf.float32))  # minimap visibility
-        pp_mini_feat.append(tf.cast(obs['mini'][..., 1:2], dtype=tf.float32) / 255.0 - 0.5)  # minimap height
-        pp_mini_feat.append(tf.one_hot(obs['mini'][..., 2], len(PlayerRelative), dtype=tf.float32))  # minimap player relative unit alliance
-        pp_mini_feat.append(tf.cast(obs['mini'][..., 3:7], dtype=tf.float32) * 1.0)  # creep / buildable / pathable / camera
-        obs['mini'] = tf.cast(tf.concat(pp_mini_feat, axis=-1), dtype=dtype)
+        # # minimap preproc
+        # pp_mini_feat = []
+        # pp_mini_feat.append(tf.one_hot(obs['mini'][..., 0], len(Visibility), dtype=tf.float32))  # minimap visibility
+        # pp_mini_feat.append(tf.cast(obs['mini'][..., 1:2], dtype=tf.float32) / 255.0 - 0.5)  # minimap height
+        # pp_mini_feat.append(tf.one_hot(obs['mini'][..., 2], len(PlayerRelative), dtype=tf.float32))  # minimap player relative unit alliance
+        # pp_mini_feat.append(tf.cast(obs['mini'][..., 3:7], dtype=tf.float32) * 1.0)  # creep / buildable / pathable / camera
+        # obs['mini'] = tf.cast(tf.concat(pp_mini_feat, axis=-1), dtype=dtype)
 
         # unit preproc
         obs['unit_id'] = tf.one_hot(obs['units'][..., 0], len(set(get_unit_embed_lookup().values())), dtype=tf.int32)  # unit ids
-        obs['unit_alliance'] = tf.one_hot(obs['units'][..., 1] - 1, 4, dtype=dtype)  # alliance: self = 1, ally = 2, neutral, enemy, -1 so its 0 indexed
-        obs['unit_cloaked'] = tf.one_hot(obs['units'][..., 19] - 1, 4, dtype=dtype)  # cloak: Cloaked = 1, CloakedDetected = 2, NotCloaked = 3, Unknown = 4, -1 so its 0 indexed
+        # obs['unit_alliance'] = tf.one_hot(obs['units'][..., 1] - 1, 4, dtype=dtype)  # alliance: self = 1, ally = 2, neutral, enemy, -1 so its 0 indexed
+        # obs['unit_cloaked'] = tf.one_hot(obs['units'][..., 19] - 1, 4, dtype=dtype)  # cloak: Cloaked = 1, CloakedDetected = 2, NotCloaked = 3, Unknown = 4, -1 so its 0 indexed
         obs['unit_continuous'] = tf.concat([
-            tf.cast(obs['units'][..., 2:5], dtype=dtype) / 255.0 - 0.5,  # health / shield / energy are all in scale 0-255
+            # tf.cast(obs['units'][..., 2:5], dtype=dtype) / 255.0 - 0.5,  # health / shield / energy are all in scale 0-255
             tf.cast(obs['units'][..., 5:6], dtype=dtype) / float(self.config.screen_size) - 0.5,  # x pos
             tf.cast(obs['units'][..., 6:7], dtype=dtype) / float(self.config.screen_size) - 0.5,  # y pos
-            tf.cast(obs['units'][..., 7:8], dtype=dtype) / 5.0 - 0.5,  # radius: biggest units (command centers) have radius of 5
-            tf.cast(obs['units'][..., 10:11], dtype=dtype),  # build_progress
-            tf.cast(obs['units'][..., 12:13], dtype=dtype) / 1800.0 - 0.5,  # mineral count
-            tf.cast(obs['units'][..., 13:14], dtype=dtype) / 2250.0 - 0.5,  # vespene count
-            tf.cast(obs['units'][..., 14:15], dtype=dtype) / 8.0 - 0.5,  # cargo taken
-            tf.cast(obs['units'][..., 15:16], dtype=dtype) / 8.0 - 0.5,  # cargo max
-            tf.cast(obs['units'][..., 21:22], dtype=dtype) / 3.0 - 0.5,  # attack upgrade
-            tf.cast(obs['units'][..., 22:23], dtype=dtype) / 3.0 - 0.5,  # armour upgrade
-            tf.cast(obs['units'][..., 23:24], dtype=dtype) / 3.0 - 0.5  # shield upgrade
+            # tf.cast(obs['units'][..., 7:8], dtype=dtype) / 5.0 - 0.5,  # radius: biggest units (command centers) have radius of 5
+            # tf.cast(obs['units'][..., 10:11], dtype=dtype),  # build_progress
+            # tf.cast(obs['units'][..., 12:13], dtype=dtype) / 1800.0 - 0.5,  # mineral count
+            # tf.cast(obs['units'][..., 13:14], dtype=dtype) / 2250.0 - 0.5,  # vespene count
+            # tf.cast(obs['units'][..., 14:15], dtype=dtype) / 8.0 - 0.5,  # cargo taken
+            # tf.cast(obs['units'][..., 15:16], dtype=dtype) / 8.0 - 0.5,  # cargo max
+            # tf.cast(obs['units'][..., 21:22], dtype=dtype) / 3.0 - 0.5,  # attack upgrade
+            # tf.cast(obs['units'][..., 22:23], dtype=dtype) / 3.0 - 0.5,  # armour upgrade
+            # tf.cast(obs['units'][..., 23:24], dtype=dtype) / 3.0 - 0.5  # shield upgrade
         ], axis=-1)
         obs['unit_binary'] = tf.concat([
-            tf.cast(obs['units'][..., 8:10], dtype=dtype),  # is_selected / is_blip
-            tf.cast(obs['units'][..., 11:12], dtype=dtype),  # is_powered
-            tf.cast(obs['units'][..., 16:19], dtype=dtype),  # is_flying / is_burrowed / is_in_cargo
-            tf.cast(obs['units'][..., 20:21], dtype=dtype),  # is_hallucination
-            tf.cast(obs['units'][..., 24:65], dtype=dtype)  # boolean buffs list
+            tf.cast(obs['units'][..., 8:9], dtype=dtype),  # is_selected
+            # tf.cast(obs['units'][..., 9:10], dtype=dtype),  # is_blip
+            # tf.cast(obs['units'][..., 11:12], dtype=dtype),  # is_powered
+            # tf.cast(obs['units'][..., 16:19], dtype=dtype),  # is_flying / is_burrowed / is_in_cargo
+            # tf.cast(obs['units'][..., 20:21], dtype=dtype),  # is_hallucination
+            # tf.cast(obs['units'][..., 24:65], dtype=dtype)  # boolean buffs list
         ], axis=-1)
         del obs['units']
 
         # player preproc
-        pp_player_features = []
-        obs['player'] = tf.cast(obs['player'], dtype=tf.float32)
-        pp_player_features.append(tf.sqrt(obs['player'][..., 0:1]) / 50)  # player minerals
-        pp_player_features.append(tf.sqrt(obs['player'][..., 1:2]) / 50)  # player gas
-        pp_player_features.append(obs['player'][..., 2:3] / 200)  # supply used
-        pp_player_features.append(obs['player'][..., 3:4] / 200)  # supply max
-        pp_player_features.append(obs['player'][..., 4:5] / 10)  # warp gates
-        pp_player_features.append(obs['player'][..., 5:6] / 20)  # larva count
-        obs['player'] = tf.cast(tf.concat(pp_player_features, axis=-1), dtype=dtype)
+        # pp_player_features = []
+        # obs['player'] = tf.cast(obs['player'], dtype=tf.float32)
+        # pp_player_features.append(tf.sqrt(obs['player'][..., 0:1]) / 50)  # player minerals
+        # pp_player_features.append(tf.sqrt(obs['player'][..., 1:2]) / 50)  # player gas
+        # pp_player_features.append(obs['player'][..., 2:3] / 200)  # supply used
+        # pp_player_features.append(obs['player'][..., 3:4] / 200)  # supply max
+        # pp_player_features.append(obs['player'][..., 4:5] / 10)  # warp gates
+        # pp_player_features.append(obs['player'][..., 5:6] / 20)  # larva count
+        # obs['player'] = tf.cast(tf.concat(pp_player_features, axis=-1), dtype=dtype)
 
         obs['available_actions'] = tf.cast(obs['available_actions'], dtype=dtype)
 
@@ -378,7 +383,7 @@ class Sc2WorldModel(common.Module):
 
         unpadded_units = tf.cast(tf.not_equal(truth_unit_id[..., 0], 1), dtype=tf.int32)  # find indices where unit type not 0
         set_sizes = tf.reduce_sum(unpadded_units, axis=-1)
-        initial_set = self.heads['unit_init_set'].sample(truth_unit_id)
+        initial_set = self.heads['unit_init_set'](tf.shape(truth_unit_id)[:-1]).sample()
 
         unit_recon_dists = self.heads['units'](initial_set[:6, :5], state_feat, set_sizes[:6, :5])
 
@@ -391,6 +396,10 @@ class Sc2WorldModel(common.Module):
             unit_openl = unit_openl_dists[u].mode()[:6]
             model[u] = tf.concat([unit_recon[:, :5], unit_openl], 1)
             truth[u] = data[u][:6]
+
+        # TODO remove this, its just for testing while we arent training unit id reconstruction
+        truth['unit_id'] = truth_unit_id
+        model['unit_id'] = truth_unit_id
 
         return truth, model
 
