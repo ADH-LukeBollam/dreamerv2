@@ -209,13 +209,15 @@ class A2CAgent(common.Module):
             obs_embed, action_prob, action_oh, args = self.policy(obs)
             args['action_id'] = action_oh   # combine action and args together
 
-            obs = []
-            for i, env in enumerate(envs):
-                ob, reward, done, info = env.step({k: np.squeeze(v) for k, v in args.items()})
+            actions = [{k: np.array(args[k][i]) for k in args} for i in range(len(envs))]
+            results = [e.step(a) for e, a in zip(envs, actions)]
+
+            new_obs = []
+            for i, (ob, rew, done, info) in enumerate(results):
                 disc = info.get('discount', np.array(1 - float(done)))
-                tran = {**ob, 'reward': reward, 'discount': disc, 'done': done}
-                obs.append({k: np.expand_dims(self._convert(v), 0) for k, v in tran.items()})
-            obs = {k: np.stack([o[k] for o in self._obs]) for k in self._obs[0]}
+                tran = {**ob, 'reward': rew, 'discount': disc, 'done': done}
+                new_obs.append({k: np.expand_dims(self._convert(v), 0) for k, v in tran.items()})
+            new_obs = {k: np.stack([o[k] for o in new_obs]) for k in new_obs[0]}
 
             target, mets1 = self.target(obs_embed, action_oh, args, obs['reward'], obs['discount'])
 
@@ -231,7 +233,7 @@ class A2CAgent(common.Module):
         metrics.update(self.critic_opt(critic_tape, critic_loss, self.critic))
         metrics.update(**mets1, **mets2, **mets3, **mets4)
         self.update_slow_target()  # Variables exist after first forward pass.
-        return metrics, obs
+        return metrics, new_obs
 
     def _convert(self, value):
         value = np.array(value)
