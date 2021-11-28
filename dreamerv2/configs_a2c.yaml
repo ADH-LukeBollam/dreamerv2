@@ -1,0 +1,101 @@
+defaults:
+
+  # Train Script
+  logdir: /dev/null
+  seed: 0
+  task: CollectMineralShards
+  num_envs: 2
+  steps: 2e8
+  eval_every: 1e3
+  eval_eps: 1
+  action_repeat: 1
+  time_limit: 120
+  prefill: 20000
+  image_size: [64, 64]
+  grayscale: False
+  replay_size: 2e4
+  dataset: {batch: 15, length: 20, oversample_ends: True}
+  precision: 16
+  jit: True
+
+  # Env Settings
+  screen_size: 64
+  mini_size: 64
+  max_units: 30
+
+  # Agent
+  log_every: 1e3
+  train_every: 16
+  train_steps: 1
+  pretrain: 0
+  clip_rewards: tanh
+  expl_noise: 0.1
+  expl_behavior: greedy
+  expl_until: 0
+  eval_noise: 0.0
+  eval_state_mean: False
+
+  # World Model
+  pred_discount: True
+  grad_heads: [ units, reward, discount ]
+  rssm: {hidden: 600, deter: 600, stoch: 32, discrete: 32, act: elu, std_act: sigmoid2, min_std: 0.1}
+  encoder: { act: elu,
+             avl_action_widths: [16, 16],
+             screen_depth: 32, screen_kernels: [4, 4, 4, 4],
+             minimap_depth: 32, minimap_kernels: [4, 4, 4, 4],
+             player_widths: [16, 16],
+             unit_embed_dim: 16, unit_pp_dim: 64, unit_num_layers: 2, unit_trans_dim: 128, unit_trans_heads: 2,
+  }
+  decoder: {depth: 48, act: elu, kernels: [5, 5, 6, 6]}
+  unit_decoder: {num_layers: 2, trans_dim: 128, trans_heads: 2}
+  avl_action_head: {layers: 4, units: 400, act: elu, dist: binary}
+  player_head: {layers: 4, units: 400, act: elu, dist: binary}
+  reward_head: {layers: 4, units: 400, act: elu, dist: mse}
+  discount_head: {layers: 4, units: 400, act: elu, dist: binary}
+  loss_scales: {kl: 0.05, reward: 1.0, discount: 5.0}
+  kl: {free: 0.0, forward: False, balance: 0.8, free_avg: True}
+  model_opt: {opt: adam, lr: 1e-5, eps: 1e-5, clip: 100, wd: 1e-7}
+
+  # Actor Critic
+  type_actor: {layers: 4, units: 400, act: elu, dist: normal_onehot }
+  arg_actor: {layers: 4, units: 400, act: elu, dist: onehot }
+  critic: {layers: 4, units: 400, act: elu, dist: mse}
+  type_actor_opt: {opt: adam, lr: 1e-4, eps: 1e-5, clip: 100, wd: 1e-6}
+  arg_actor_opt: {opt: adam, lr: 1e-4, eps: 1e-5, clip: 100, wd: 1e-6}
+  critic_opt: {opt: adam, lr: 1e-4, eps: 1e-5, clip: 100, wd: 1e-6}
+  discount: 0.999
+  discount_lambda: 0.95
+  imag_horizon: 15
+  actor_grad: reinforce
+  actor_grad_mix: 0
+  actor_ent: 1e-3
+  slow_target: True
+  slow_target_update: 100
+  slow_target_fraction: 1
+
+  # Exploration
+  expl_extr_scale: 0.0
+  expl_intr_scale: 1.0
+  expl_opt: {opt: adam, lr: 3e-4, eps: 1e-5, clip: 100, wd: 1e-6}
+  expl_head: {layers: 4, units: 400, act: elu, dist: mse}
+  disag_target: stoch
+  disag_log: True
+  disag_models: 10
+  disag_offset: 1
+  disag_action_cond: True
+  expl_model_loss: kl
+
+sc2:
+  .*\.wd$: 1e-6
+
+debug:
+
+  jit: False
+  time_limit: 100
+  eval_every: 300
+  log_every: 300
+  prefill: 100
+  pretrain: 1
+  train_steps: 1
+  dataset.batch: 10
+  dataset.length: 10

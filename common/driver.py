@@ -37,7 +37,6 @@ class Driver:
           self._obs[i] = ob = self._envs[i].reset()
           act = {k: np.zeros(v.shape) for k, v in self._actspaces[i].items()}
           tran = {**ob, **act, 'reward': 0.0, 'discount': 1.0, 'done': False}
-          tran = {k: np.expand_dims(self._convert(v), 0) for k, v in tran.items()}
           [callback(tran, **self._kwargs) for callback in self._on_resets]
           self._eps[i] = [tran]
       obs = {k: np.stack([o[k] for o in self._obs]) for k in self._obs[0]}

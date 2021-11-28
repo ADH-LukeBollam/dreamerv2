@@ -12,7 +12,7 @@ import numpy as np
 
 
 class A2CAgent(common.Module):
-    def __init__(self, config, logger, actspce, step, action_required_args, env):
+    def __init__(self, config, logger, actspce, step, action_required_args, envs):
         self.config = config
         self.step = step
 
@@ -61,12 +61,12 @@ class A2CAgent(common.Module):
         for a in act:
             act[a][0] = 1
 
-        env.reset()
-        (ob, rew, done, info) = env.step(act)
+        envs[0].reset()
+        (ob, rew, done, info) = envs[0].step(act)
         disc = info.get('discount', np.array(1 - float(done)))
         obs = {**ob, 'reward': rew, 'discount': disc, 'done': done}
         obs = {k: np.expand_dims(self._convert(v), 0) for k, v in obs.items()}
-        self.train(obs, env)
+        self.train(obs, [envs[0]])
 
     def get_sc2_action(self, type_actor, arg_actor, feat, available_actions, should_sample, mode):
         action_norm, action_onehot = type_actor(feat)
@@ -187,19 +187,22 @@ class A2CAgent(common.Module):
                           args['arg_5_0'], args['arg_6_0'], args['arg_7_0'], args['arg_9_0'], args['arg_10_0']], axis=-1)
 
     @tf.function
-    def eval(self, obs, env):
+    def eval(self, obs, envs):
         metrics = {}
 
         obs_embed, action_prob, action_oh, args = self.policy(obs, mode='eval')
         args['action_id'] = action_oh  # combine action and args together
 
-        ob, reward, done, info = env.step({k: np.squeeze(v) for k, v in args.items()})
+        actions = [{k: np.array(args[k][i]) for k in args} for i in range(len(envs))]
+        results = [e.step(a) for e, a in zip(envs, actions)]
 
-        disc = info.get('discount', np.array(1 - float(done)))
-        obs = {**ob, 'reward': reward, 'discount': disc, 'done': done}
-        obs = {k: np.expand_dims(self._convert(v), 0) for k, v in obs.items()}
+        new_obs = []
+        for i, (ob, rew, done, info) in enumerate(results):
+            disc = info.get('discount', np.array(1 - float(done)))
+            tran = {**ob, 'reward': rew, 'discount': disc, 'done': done}
+            new_obs.append({k: self._convert(v) for k, v in tran.items()})
 
-        return metrics, obs
+        return metrics, new_obs
 
     @tf.function
     def train(self, obs, envs):
@@ -216,10 +219,10 @@ class A2CAgent(common.Module):
             for i, (ob, rew, done, info) in enumerate(results):
                 disc = info.get('discount', np.array(1 - float(done)))
                 tran = {**ob, 'reward': rew, 'discount': disc, 'done': done}
-                new_obs.append({k: np.expand_dims(self._convert(v), 0) for k, v in tran.items()})
-            new_obs = {k: np.stack([o[k] for o in new_obs]) for k in new_obs[0]}
+                new_obs.append({k: self._convert(v) for k, v in tran.items()})
 
-            target, mets1 = self.target(obs_embed, action_oh, args, obs['reward'], obs['discount'])
+            next_obs = {k: np.stack([o[k] for o in new_obs]) for k in new_obs[0]}
+            target, mets1 = self.target(obs_embed, action_oh, args, next_obs['reward'], next_obs['discount'])
 
             type_actor_loss, mets2 = self.action_loss(obs_embed, action_oh, target)
             arg_actor_loss, mets3 = self.arg_loss(obs_embed, action_oh, args, target)

@@ -4,13 +4,13 @@ import tensorflow as tf
 
 class A2CDriver:
 
-    def __init__(self, env, **kwargs):
-        self._envs = env
+    def __init__(self, envs, **kwargs):
+        self._envs = envs
         self._kwargs = kwargs
         self._on_steps = []
         self._on_resets = []
         self._on_episodes = []
-        self._actspace = env.action_space
+        self._actspace = envs[0].action_space
         self.reset()
 
     def on_step(self, callback):
@@ -34,9 +34,8 @@ class A2CDriver:
             for i, done in enumerate(self._dones):
                 if done:
                     ob = self._envs[i].reset()
-                    act = {k: np.zeros(v.shape) for k, v in self._actspace.items()}
-                    state = {**ob, **act, 'reward': 0.0, 'discount': 1.0, 'done': False}
-                    state = {k: np.expand_dims(self._convert(v), 0) for k, v in state.items()}
+                    state = {**ob, 'reward': 0.0, 'discount': 1.0, 'done': False}
+                    state = {k: self._convert(v) for k, v in state.items()}
                     [callback(state, **self._kwargs) for callback in self._on_resets]
                     self._obs[i] = state
                     self._eps[i] = [state]
@@ -45,7 +44,7 @@ class A2CDriver:
             metrics, self._obs = policy(obs, self._envs)
 
             for i, obs in enumerate(self._obs):
-                [callback(obs, metrics, **self._kwargs) for callback in self._on_steps]
+                [callback(metrics, **self._kwargs) for callback in self._on_steps]
                 self._eps[i].append(obs)
 
                 if obs['done']:
@@ -53,7 +52,7 @@ class A2CDriver:
                     ep = {k: self._convert([t[k] for t in ep]) for k in ep[0]}
                     [callback(ep, **self._kwargs) for callback in self._on_episodes]
 
-            self._dones = [obs['done'] for obs in self._obs]
+            self._dones = [obs['done'].item() for obs in self._obs]
             episode += sum(self._dones)
             step += len(self._dones)
 

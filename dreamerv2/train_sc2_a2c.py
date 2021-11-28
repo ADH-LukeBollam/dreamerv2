@@ -1,10 +1,6 @@
 import collections
-import functools
-import logging
-import os
 import pathlib
 import sys
-import warnings
 import numpy as np
 import ruamel.yaml as yaml
 import tensorflow as tf
@@ -13,7 +9,7 @@ import agent_a2c
 import elements
 import common
 
-configs = pathlib.Path(sys.argv[0]).parent / 'configs_sc2.yaml'
+configs = pathlib.Path(sys.argv[0]).parent / 'configs_a2c.yaml'
 configs = yaml.safe_load(configs.read_text())
 config = elements.Config(configs['defaults'])
 parsed, remaining = elements.FlagParser(configs=['defaults']).parse_known(
@@ -74,18 +70,18 @@ def per_episode(ep, mode):
 
 
 print('Create envs.')
-train_env = make_env('train')
-eval_env = make_env('eval')
-action_space = train_env.action_space
-action_req_args = train_env.action_arg_lookup
-train_driver = common.A2CDriver(train_env)
+train_envs = [make_env('train') for _ in range(config.num_envs)]
+eval_env = [make_env('eval')]
+action_space = train_envs[0].action_space
+action_req_args = train_envs[0].action_arg_lookup
+train_driver = common.A2CDriver(train_envs)
 train_driver.on_episode(lambda ep: per_episode(ep, mode='train'))
 train_driver.on_step(lambda _: step.increment())
 eval_driver = common.A2CDriver(eval_env)
 eval_driver.on_episode(lambda ep: per_episode(ep, mode='eval'))
 
 print('Create agent.')
-agnt = agent_a2c.A2CAgent(config, logger, action_space, step, action_req_args, train_env)
+agnt = agent_a2c.A2CAgent(config, logger, action_space, step, action_req_args, train_envs)
 if (logdir / 'variables.pkl').exists():
     agnt.load(logdir / 'variables.pkl')
 
@@ -109,7 +105,8 @@ while step < config.steps:
     train_driver(agnt.train, steps=config.eval_every)
     agnt.save(logdir / 'variables.pkl')
 
-for env in [train_env, eval_env]:
+
+for env in train_envs + eval_env:
     try:
         env.close()
     except Exception:
